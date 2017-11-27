@@ -176,31 +176,31 @@ def build_bioneurons(model, neuron_type, neurons):
     # This can generate hard-to-track problems related to these attributes.
     # However, setting them like 'neurons' are set below may not be possible
     # because these attributes are used in more places in the build process.
-    print ens.encoders
+    rng = np.random.RandomState(seed=ens.seed)
     if hasattr(ens, 'encoders') and ens.encoders is not None:
-        ens.encoders = nengo.dists.get_samples(ens.encoders, ens.n_neurons, ens.dimensions)
+        ens.encoders = nengo.dists.get_samples(ens.encoders, ens.n_neurons, ens.dimensions, rng)
     else:
         ens.encoders = gen_encoders(
             ens.n_neurons,
             ens.dimensions,
             ens.radius,
-            ens.seed)
+            rng)
     if hasattr(ens, 'gain') and ens.gain is not None:
-        ens.gain = nengo.dists.get_samples(ens.gain, ens.n_neurons, 1)[:,0]
+        ens.gain = nengo.dists.get_samples(ens.gain, ens.n_neurons, 1, rng)[:,0]
     else:
         ens.gain = gen_gains(
             ens.n_neurons,
             ens.dimensions,
             ens.radius,
-            ens.seed+1)
+            rng)
     if hasattr(ens, 'bias') and ens.bias is not None:
-        ens.bias = nengo.dists.get_samples(ens.bias, ens.n_neurons, 1)[:,0]
+        ens.bias = nengo.dists.get_samples(ens.bias, ens.n_neurons, 1, rng)[:,0]
     else:
         ens.bias = gen_biases(
             ens.n_neurons,
             ens.dimensions,
             ens.radius,
-            ens.seed+2)
+            rng)
 
     model.add_op(op)
 
@@ -378,20 +378,17 @@ def build_connection(model, conn):
     else:  # normal connection
         return nengo.builder.connection.build_connection(model, conn)
 
-def gen_encoders(n_neurons, dimensions, radius, seed):
-    rng = np.random.RandomState(seed=seed)
+def gen_encoders(n_neurons, dimensions, radius, rng):
     enc_mag = 1.0 * radius
     encoders = rng.uniform(-enc_mag, enc_mag, size=(n_neurons, dimensions))
     return encoders.astype(float)
 
-def gen_gains(n_neurons, dimensions, radius, seed):
-    rng = np.random.RandomState(seed=seed)
+def gen_gains(n_neurons, dimensions, radius, rng):
     gain_mag = 1e2 * radius
     gains = rng.uniform(-gain_mag, gain_mag, size=n_neurons)
     return gains
 
-def gen_biases(n_neurons, dimensions, radius, seed):
-    rng = np.random.RandomState(seed=seed)
+def gen_biases(n_neurons, dimensions, radius, rng):
     bias_mag = 3e0 * radius
     biases = rng.uniform(-bias_mag, bias_mag, size=n_neurons)
     return biases
@@ -399,7 +396,6 @@ def gen_biases(n_neurons, dimensions, radius, seed):
 
 
 def get_enc_gain(n_neurons, dimensions, radius, seed):
-    rng = np.random.RandomState(seed=seed)
     # todo: play with distributions
     encoders = rng.uniform(-1, 1, size=(n_neurons, dimensions))
     gain_mag = 1e2 * radius

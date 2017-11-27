@@ -8,6 +8,7 @@ root = os.path.dirname(os.path.realpath(__file__))
 
 def check_dependencies():
     install_requires = []
+    
     try:
         import nengo
     except ImportError:
@@ -16,6 +17,10 @@ def check_dependencies():
         import numpy
     except ImportError:
         install_requires.append('numpy')
+    try:
+        import scipy
+    except ImportError:
+        install_requires.append('scipy')
     try:
         import neuron
     except ImportError:
@@ -32,11 +37,15 @@ def check_dependencies():
         import seaborn
     except ImportError:
         install_requires.append('seaborn')
-    return install_requires
     try:
         import pytest
     except ImportError:
         install_requires.append('pytest')
+    try:
+        import pathos
+    except ImportError:
+        install_requires.append('pathos')
+
     return install_requires
 
 def readme():

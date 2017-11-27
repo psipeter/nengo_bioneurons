@@ -11,5 +11,6 @@ from .bio_connection import *
 from .bio_simulator import *
 from .builder import *  # executes Builder.register methods
 from .monkeypatch import *
+from .evolve_filters import *
 
 patch()  # nengo.Connection <-> BioConnection, Simulator cleanup
