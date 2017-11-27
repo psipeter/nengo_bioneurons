@@ -5,8 +5,8 @@ import nengo
 from nengo import Connection as NengoConnection
 from nengo import Simulator as NengoSimulator
 
-from bioneuron_oracle.bio_connection import BioConnection
-from bioneuron_oracle.bio_simulator import BioSimulator
+from nengo_bioneurons.bio_connection import BioConnection
+from nengo_bioneurons.bio_simulator import BioSimulator
 
 __all__ = ['patch', 'unpatch']
 

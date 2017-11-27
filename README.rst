@@ -14,6 +14,9 @@ Work on a virtual environment?
 
     pip install virtualenvwrapper --user
 
+    (edit .bashrc so that virtualenvwrapper.sh is in your PATH)
+    (e.g. export PATH=$HOME/.local/bin:${PATH} then run source .bashrc in command line)
+
     mkvirtualenv nengo_bioneurons
 
 
@@ -24,7 +27,7 @@ Install NEURON and other dependencies
 
 change --prefix to another directory. If you're using virtualenv and virtualenvwrapper, this will be your your /HOME/USER/.local/directory
 
-    pip install nengo matplotlib seaborn numpy pandas
+    pip install nengo matplotlib seaborn numpy pandas pytest
 
     wget http://www.neuron.yale.edu/ftp/neuron/versions/v7.4/nrn-7.4.tar.gz
     
@@ -57,7 +60,7 @@ Be sure to change the path to your .local directory to compile the NEURON channe
     
     /home/$USER/.local/x86_64/bin/nrnivmodl
     
-If the python kernel crashes at some point and you get an error in the terminal that says "NEURON: syntax error [...] insert ih", it means that the channels weren't initialized properly.
+If the python kernel crashes at some point and you get an error that says "NEURON: syntax error [...] insert ih", it means that the channels weren't initialized properly. You might also get a segmentation fault.
 
 Install nengo_bioneurons
 ========================

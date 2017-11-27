@@ -33,6 +33,11 @@ def check_dependencies():
     except ImportError:
         install_requires.append('seaborn')
     return install_requires
+    try:
+        import pytest
+    except ImportError:
+        install_requires.append('pytest')
+    return install_requires
 
 def readme():
     with open('README.rst') as f:
