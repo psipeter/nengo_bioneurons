@@ -10,6 +10,7 @@ from nengo.builder.ensemble import get_activities
 from nengo.exceptions import BuildError
 from nengo.utils.builder import full_transform
 from nengo.solvers import NoSolver
+from nengo.builder.operator import Copy
 
 from nengo_bioneurons.bahl_neuron import BahlNeuron
 
@@ -64,7 +65,7 @@ class ExpSyn(object):
         self.e_exc = e_exc
         self.e_inh = e_inh
         self.syn = neuron.h.ExpSyn(sec)
-        self.syn.tau = 1000*self.tau  # no more 2x multiply
+        self.syn.tau = 1000 * self.tau
         self.weight = weight
         if self.weight >= 0.0:
             self.syn.e = self.e_exc
@@ -75,13 +76,13 @@ class ExpSyn(object):
         self.spike_in.weight[0] = abs(self.weight)
 
 
-class SimBahlNeuron(Operator):
+class SimBioneuron(Operator):
     """
     Operator to simulate the states of a bioensemble through time.
     """
 
     def __init__(self, neuron_type, neurons, output, voltage, states):
-        super(SimBahlNeuron, self).__init__()
+        super(SimBioneuron, self).__init__()
         self.neuron_type = neuron_type
         self.neurons = neurons
 
@@ -147,51 +148,135 @@ class TransmitSpikes(Operator):
                             syn.spike_in.event(t_neuron)
         return step
 
+def deref_objview(o):
+    return o.obj if isinstance(o, ObjView) else o
 
 @Builder.register(BahlNeuron)
-def build_bahlneuron(model, neuron_type, neurons):
+def build_bioneurons(model, neuron_type, neurons):
     ens = neurons.ensemble
-    bahl_neurons = [Bahl() for _ in range(ens.n_neurons)]
+    # todo: generalize to new NEURON models specified by neuron_type
+    bioneurons = [Bahl() for _ in range(ens.n_neurons)]
+    # todo: call user-defined function that introduces variance into specific
+    # NEURON parameters in each bioneuron, to encourage heterogeneity
     neuron.init()
 
     model.sig[neurons]['voltage'] = Signal(
         np.zeros(ens.n_neurons),
         name='%s.voltage' % ens.label)
-    op = SimBahlNeuron(neuron_type=neuron_type,
-                       neurons=bahl_neurons,
+    op = SimBioneuron(neuron_type=neuron_type,
+                       neurons=bioneurons,
                        output=model.sig[neurons]['out'],
                        voltage=model.sig[neurons]['voltage'],
                        states=[model.time])
 
-    # Initialize specific encoders and gains,
-    # if this hasn't already been done
-    if (not hasattr(ens, 'encoders') or
-            not isinstance(ens.encoders, np.ndarray)):
-        rng = np.random.RandomState(seed=ens.seed)
-        # encoders, gains = gen_encoders_gains_manual(
-        #     ens.n_neurons,
-        #     ens.dimensions,
-        #     rng)
-        encoders, gains = gen_encoders_gains_LIF(
+    # Initialize encoders, gains, and biases according to some heuristics,
+    # unless the user has specified them already.
+    # Note: setting encoders/gains/biases in this way doesn't really
+    # respect the high-level ordering of the nengo build process.
+    # This can generate hard-to-track problems related to these attributes.
+    # However, setting them like 'neurons' are set below may not be possible
+    # because these attributes are used in more places in the build process.
+    print ens.encoders
+    if hasattr(ens, 'encoders') and ens.encoders is not None:
+        ens.encoders = nengo.dists.get_samples(ens.encoders, ens.n_neurons, ens.dimensions)
+    else:
+        ens.encoders = gen_encoders(
             ens.n_neurons,
             ens.dimensions,
-            ens.max_rates,
-            ens.intercepts,
             ens.radius,
             ens.seed)
-        ens.encoders = encoders
-        ens.gain = gains
-        ens.bias = np.zeros_like(gains)
-        # Note: setting encoders/gains/biases in this way doesn't really
-        # respect the high-level ordering of the nengo build process.
-        # This can generate hard-to-track problems related to these attributes.
-        # However, setting them like 'neurons' are set below may not be possible
-        # because these attributes are used in more places in the build process.
+    if hasattr(ens, 'gain') and ens.gain is not None:
+        ens.gain = nengo.dists.get_samples(ens.gain, ens.n_neurons, 1)[:,0]
+    else:
+        ens.gain = gen_gains(
+            ens.n_neurons,
+            ens.dimensions,
+            ens.radius,
+            ens.seed+1)
+    if hasattr(ens, 'bias') and ens.bias is not None:
+        ens.bias = nengo.dists.get_samples(ens.bias, ens.n_neurons, 1)[:,0]
+    else:
+        ens.bias = gen_biases(
+            ens.n_neurons,
+            ens.dimensions,
+            ens.radius,
+            ens.seed+2)
+
     model.add_op(op)
 
     assert neurons not in model.params
-    model.params[neurons] = bahl_neurons
+    model.params[neurons] = bioneurons
 
+    # Build a bias-emulating connection
+    build_bias(model, ens, ens.bias)
+
+
+def build_bias(model, bioensemble, biases):
+    rng = np.random.RandomState(bioensemble.seed)
+    neurons_lif = 100
+    neurons_bio = bioensemble.n_neurons
+    tau = 0.01
+
+    lif = nengo.Ensemble(
+            neuron_type=nengo.LIF(),
+            dimensions=1,
+            n_neurons=neurons_lif,
+            # seed=bioensemble.seed,
+            add_to_container=False)
+    model.seeds[lif] = bioensemble.seed  # seeds normally set early in builder
+    model.build(lif)  # add to the model
+    model.add_op(Copy(Signal(1), model.sig[lif]['in'], inc=True))  # connect input(t)=1
+    A = get_activities(model.params[lif],  # grab tuning curve activities
+        lif,
+        model.params[lif].eval_points)
+
+    # Desired output function Y -- just repeat "bias" m times
+    Y = np.tile(biases, (A.shape[0], 1))
+    bias_decoders = nengo.solvers.LstsqL2()(A, Y)[0]
+
+    # initialize synaptic locations
+    syn_loc = get_synaptic_locations(
+        rng,
+        neurons_lif,
+        neurons_bio,
+        'apical',
+        n_syn=1,
+        seed=bioensemble.seed)
+    syn_weights = np.zeros((
+        neurons_bio,
+        neurons_lif,
+        syn_loc.shape[2]))
+
+    # unit test that synapse and weight arrays are compatible shapes
+    if not syn_loc.shape[:-1] == bias_decoders.T.shape:
+        raise BuildError("Shape mismatch: syn_loc=%s, bias_decoders=%s"
+                         % (syn_loc.shape[:-1], bias_decoders))
+
+    # add synapses to the bioneurons with weights = bias_decoders
+    neurons = model.params[bioensemble.neurons]
+    for j, bahl in enumerate(neurons):
+        assert isinstance(bahl, Bahl)
+        loc = syn_loc[j]
+        bahl.synapses[lif] = np.empty(
+            (loc.shape[0], loc.shape[1]), dtype=object)
+        for pre in range(loc.shape[0]):
+            for syn in range(loc.shape[1]):
+                section = bahl.cell.apical(loc[pre, syn])
+                # w_ij = np.dot(decoders[pre], gain * encoder)
+                w_ij = bias_decoders[pre, j]
+                syn_weights[j, pre, syn] = w_ij
+                synapse = ExpSyn(section, w_ij, tau, loc[pre, syn])
+                bahl.synapses[lif][pre][syn] = synapse
+    neuron.init()
+
+    model.add_op(TransmitSpikes(
+        lif, bioensemble, neurons,
+        model.sig[lif]['out'], states=[model.time]))
+    # todo: update model.params
+    # model.params['bias'] = BuiltConnection(eval_points=eval_points,
+    #                                      solver_info=solver_info,
+    #                                      transform=transform,
+    #                                      weights=syn_weights)
 
 @Builder.register(nengo.Connection)
 def build_connection(model, conn):
@@ -204,34 +289,23 @@ def build_connection(model, conn):
     Adds a transmit_spike operator for this connection to the model
     """
 
-    def deref_objview(o):
-        return o.obj if isinstance(o, ObjView) else o
-
     conn_pre = deref_objview(conn.pre)
     conn_post = deref_objview(conn.post)
 
     if isinstance(conn_pre, nengo.Ensemble) and \
-       isinstance(conn_pre.neuron_type, BahlNeuron):
-        # if not isinstance(conn.solver, NoSolver):
-        #     raise BuildError("Connections from bioneurons must provide a NoSolver"
-        #                     " (got %s from %s to %s)" 
-        #                     % (conn.solver, conn_pre, conn_post))
-        if (not isinstance(conn.solver, OracleSolver) and 
-                not isinstance(conn.solver, TrainedSolver) and
-                not isinstance(conn.solver, NoSolver)):
-            raise BuildError("Connections from bioneurons must provide "
-                             "a OracleSolver or TrainedSolver or NoSolver"
-                            " (got %s from %s to %s)"
-                             % (conn.solver, conn_pre, conn_post))
-                # and hasattr(conn_post, 'label') and conn_post.label != 'temp_sub_spike_match'):  # TODO: less hacky
+            isinstance(conn_pre.neuron_type, BahlNeuron):
+        # todo: generalize to custom online solvers
+        if not isinstance(conn.solver, NoSolver):
+            raise BuildError("Connections from bioneurons must provide a NoSolver"
+                            " (got %s from %s to %s)" 
+                            % (conn.solver, conn_pre, conn_post))
 
     if isinstance(conn_post, nengo.Ensemble) and \
        isinstance(conn_post.neuron_type, BahlNeuron):
-        # conn_pre must output spikes to connect to bioneurons
         # TODO: other error handling?
         # TODO: detect this earlier inside BioConnection __init__
         if not isinstance(conn_pre, nengo.Ensemble) or \
-           'spikes' not in conn_pre.neuron_type.probeable:
+                'spikes' not in conn_pre.neuron_type.probeable:
             raise BuildError("May only connect spiking neurons (pre=%s) to "
                              "bioneurons (post=%s)" % (conn_pre, conn_post))
 
@@ -241,117 +315,54 @@ def build_connection(model, conn):
 
         """
         Given a parcicular connection, labeled by conn.pre,
-        compute the optimal decoders, generate locations for synapses,
+        grab the initial decoders, generate locations for synapses,
         then create a synapse with weight equal to
         w_ij=np.dot(d_i,alpha_j*e_j)+w_bias, where
-            - d_i is the presynaptic decoder computed by a nengo solver,
+            - d_i is the initial decoder,
             - e_j is the single bioneuron encoder
             - w_bias is a weight perturbation that emulates bias
         Afterwards add synapses to bioneuron.synapses and call neuron.init().
         """
         # initialize synaptic locations and weights
         syn_loc = get_synaptic_locations(
-            rng, conn_pre.n_neurons, conn_post.n_neurons,
-            conn.syn_sec, conn.n_syn, seed=model.seeds[conn])
+            rng,
+            conn_pre.n_neurons,
+            conn_post.n_neurons,
+            conn.syn_sec,
+            conn.n_syn,
+            seed=model.seeds[conn])
         syn_weights = np.zeros((
-            conn_post.n_neurons, conn_pre.n_neurons, syn_loc.shape[2]))
+            conn_post.n_neurons,
+            conn_pre.n_neurons,
+            syn_loc.shape[2]))
 
-        # emulated biases in weight space
-        if conn.weights_bias_conn:
-            # weights_bias = gen_weights_bias_manual(
-            #     conn_pre.n_neurons,
-            #     conn_post.n_neurons,
-            #     rng)
-            weights_bias = gen_weights_bias_LIF(
-                conn_pre.n_neurons,
-                conn_pre.dimensions,
-                conn_pre.max_rates,
-                conn_pre.intercepts,
-                conn_pre.radius,
-                conn_pre.seed,
-                conn_post.n_neurons,
-                conn_post.dimensions,
-                conn_post.max_rates,
-                conn_post.intercepts,
-                conn_post.radius,
-                conn_post.seed)
-
-        # Grab decoders from this connections OracleSolver
-        # TODO: fails for slicing into TrainedSolver (?)
-        eval_points, weights, solver_info = build_decoders(
+        # Grab decoders from the specified solver (usually nengo.solvers.NoSolver(d))
+        eval_points, decoders, solver_info = build_decoders(
                 model, conn, rng, transform)
 
-        # unit test that synapse and weight arrays are compatible shapes
-        if (conn.weights_bias_conn and
-                not syn_loc.shape[:-1] == weights_bias.T.shape):
-            raise BuildError("Shape mismatch: syn_loc=%s, weights_bias=%s"
-                             % (syn_loc.shape[:-1], weights_bias))
-
-        if conn.trained_weights:
-            weights = solver_info['weights_bio']  # TODO: better workaround to grab correctly shaped weights_bio
-            if (weights.ndim != 3 or
-                weights.shape != (conn_post.n_neurons, conn_pre.n_neurons,
-                                  conn.n_syn)):
-                raise BuildError("Bad weight matrix shape: expected %s, got %s"
-                                 % ((conn_post.n_neurons, conn_pre.n_neurons,
-                                    conn.n_syn), weights.shape))
-            if isinstance(conn.post, ObjView):
-                raise BuildError("Slicing into bioneurons with\
-                    spike-match-trained weights is not implemented:\
-                    these bioneurons don't have encoders")
-
         # normalize the area under the ExpSyn curve to compensate for effect of tau
-        times = np.arange(0, 1.0, 0.001)  # to 1s by dt=0.001
+        times = np.arange(0, 1.0, 0.001)
         k_norm = np.linalg.norm(np.exp((-times/conn.synapse.tau)),1)
-        # print np.sum(np.exp(-times/conn.synapse.tau)/k_norm)
-        # print k_norm
 
-        neurons = model.params[conn_post.neurons]  # set in build_bahlneuron
-        if conn.trained_weights:  # hyperopt trained weights
-            for j, bahl in enumerate(neurons):
-                assert isinstance(bahl, Bahl)
-                loc = syn_loc[j]            
-                tau = conn.synapse.tau
-                bahl.synapses[conn_pre] = np.empty(
-                    (loc.shape[0], loc.shape[1]), dtype=object)
-                for pre in range(loc.shape[0]):
-                    for syn in range(loc.shape[1]):
-                        section = bahl.cell.apical(loc[pre, syn])
-                        w_ij = weights[j, pre, syn] / conn.n_syn / k_norm # TODO: better n_syn scaling
-                        syn_weights[j, pre, syn] = w_ij
-                        synapse = ExpSyn(section, w_ij, tau, loc[pre, syn])
-                        bahl.synapses[conn_pre][pre][syn] = synapse
-
-        else:  # oracle weights
-            for j, bahl in enumerate(neurons):
-                assert isinstance(bahl, Bahl)
-                d_in = 1e+2 * weights.T * 1e-1
-                loc = syn_loc[j]
-                if conn.weights_bias_conn:
-                    w_bias = weights_bias[:, j]
-                tau = conn.synapse.tau
-                encoder = conn_post.encoders[j]
-                gain = conn_post.gain[j]
-                bahl.synapses[conn_pre] = np.empty(
-                    (loc.shape[0], loc.shape[1]), dtype=object)
-                for pre in range(loc.shape[0]):
-                    # if conn.synaptic_encoders or conn.synaptic_gains:  # todo
-                    #     seed = conn_post.seed + j + pre
-                    #     n_syn = loc.shape[0] * loc.shape[1]
-                    #     dim = conn_post.dimensions
-                    #     syn_encoders, syn_gains = gen_encoders_gains_LIF(n_syn, dim, seed)
-                    for syn in range(loc.shape[1]):
-                        section = bahl.cell.apical(loc[pre, syn])
-                        # if conn.synaptic_encoders or conn.synaptic_gains:  # todo
-                        #     encoder = syn_encoders[syn]
-                        #     gain = syn_gains[syn]
-                        w_ij = np.dot(d_in[pre], gain * encoder)
-                        if conn.weights_bias_conn:
-                            w_ij += w_bias[pre]
-                        w_ij = w_ij / conn.n_syn / k_norm
-                        syn_weights[j, pre, syn] = w_ij
-                        synapse = ExpSyn(section, w_ij, tau, loc[pre, syn])
-                        bahl.synapses[conn_pre][pre][syn] = synapse
+        # todo: synaptic gains and encoders
+        neurons = model.params[conn_post.neurons]  # set in build_bioneurons
+        for j, bahl in enumerate(neurons):
+            assert isinstance(bahl, Bahl)
+            loc = syn_loc[j]
+            tau = conn.synapse.tau
+            encoder = conn_post.encoders[j]
+            gain = conn_post.gain[j]
+            bahl.synapses[conn_pre] = np.empty(
+                (loc.shape[0], loc.shape[1]), dtype=object)
+            for pre in range(loc.shape[0]):
+                for syn in range(loc.shape[1]):
+                    section = bahl.cell.apical(loc[pre, syn])
+                    w_ij = np.dot(decoders.T[pre], gain * encoder)
+                    w_ij = w_ij / conn.n_syn / k_norm
+                    syn_weights[j, pre, syn] = w_ij
+                    # todo: support other NEURON synapse types
+                    synapse = ExpSyn(section, w_ij, tau, loc[pre, syn])
+                    bahl.synapses[conn_pre][pre][syn] = synapse
         neuron.init()
 
         model.add_op(TransmitSpikes(
@@ -361,23 +372,40 @@ def build_connection(model, conn):
                                              solver_info=solver_info,
                                              transform=transform,
                                              weights=syn_weights)
+        # todo: test if computed weights produce
+        # heterogeneous tuning curves with plausible firing rates
 
     else:  # normal connection
         return nengo.builder.connection.build_connection(model, conn)
 
-def gen_encoders_gains_manual(n_neurons, dimensions, rng):
-    enc_mag = 1e+0  # todo: pass as parameter
-    gain_mag = 1e+4
+def gen_encoders(n_neurons, dimensions, radius, seed):
+    rng = np.random.RandomState(seed=seed)
+    enc_mag = 1.0 * radius
     encoders = rng.uniform(-enc_mag, enc_mag, size=(n_neurons, dimensions))
-    # dist = nengo.dists.UniformHypersphere()
-    # encoders = nengo.dists.get_samples(dist, n=n_neurons, d=dimensions, rng=rng)
+    return encoders.astype(float)
+
+def gen_gains(n_neurons, dimensions, radius, seed):
+    rng = np.random.RandomState(seed=seed)
+    gain_mag = 1e2 * radius
+    gains = rng.uniform(-gain_mag, gain_mag, size=n_neurons)
+    return gains
+
+def gen_biases(n_neurons, dimensions, radius, seed):
+    rng = np.random.RandomState(seed=seed)
+    bias_mag = 3e0 * radius
+    biases = rng.uniform(-bias_mag, bias_mag, size=n_neurons)
+    return biases
+
+
+
+def get_enc_gain(n_neurons, dimensions, radius, seed):
+    rng = np.random.RandomState(seed=seed)
+    # todo: play with distributions
+    encoders = rng.uniform(-1, 1, size=(n_neurons, dimensions))
+    gain_mag = 1e2 * radius
     gains = rng.uniform(-gain_mag, gain_mag, size=n_neurons)
     return encoders, gains
 
-def gen_weights_bias_manual(pre_n_neurons, post_n_neurons, rng):
-    w_bias_mag = 1e-2 # todo: pass as parameter
-    w_bias = rng.uniform(-w_bias_mag, w_bias_mag, size=(pre_n_neurons, post_n_neurons))
-    return w_bias
 
 def gen_encoders_gains_LIF(n_neurons,
                     dimensions,
@@ -451,14 +479,14 @@ def gen_weights_bias_LIF(pre_n_neurons,
 def get_synaptic_locations(rng, pre_neurons, n_neurons,
                            syn_sec, n_syn, seed):
     """Choose one:"""
-    # TODO: make syn_distribution an optional parameters of nengo.Connection
-    # same locations per connection and per bioneuron
-#     rng2=np.random.RandomState(seed=333)
-#     syn_locations=np.array([rng2.uniform(0,1,size=(pre_neurons,n_syn))
-#         for n in range(n_neurons)])
-    # same locations per connection and unique locations per bioneuron
-#     rng2=np.random.RandomState(seed=333)
-#     syn_locations=rng2.uniform(0,1,size=(n_neurons,pre_neurons,n_syn))
+    # todo: make syn_distribution an optional parameters of nengo.Connection
     # unique locations per connection and per bioneuron (uses conn's rng)
     syn_locations = rng.uniform(0, 1, size=(n_neurons, pre_neurons, n_syn))
+    # same locations per connection and per bioneuron
+    # rng2=np.random.RandomState(seed=333)
+    # syn_locations=np.array([rng2.uniform(0,1,size=(pre_neurons,n_syn))
+    #     for n in range(n_neurons)])
+    # same locations per connection and unique locations per bioneuron
+    # rng2=np.random.RandomState(seed=333)
+    # syn_locations=rng2.uniform(0,1,size=(n_neurons,pre_neurons,n_syn))
     return syn_locations
