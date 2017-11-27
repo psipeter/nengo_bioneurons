@@ -52,7 +52,7 @@ class Bahl(object):
 
 class ExpSyn(object):
     """
-    Conductance-based synapses.
+    Conductance-based synapses with exponential decay time tau.
     There are two types, excitatory and inhibitory,
     with different reversal potentials.
     If the synaptic weight is above zero, initialize an excitatory synapse,
@@ -66,6 +66,34 @@ class ExpSyn(object):
         self.e_inh = e_inh
         self.syn = neuron.h.ExpSyn(sec)
         self.syn.tau = 1000 * self.tau
+        self.weight = weight
+        if self.weight >= 0.0:
+            self.syn.e = self.e_exc
+        else:
+            self.syn.e = self.e_inh
+        # time of spike arrival assigned in nengo step
+        self.spike_in = neuron.h.NetCon(None, self.syn)        
+        self.spike_in.weight[0] = abs(self.weight)
+
+
+class Exp2Syn(object):
+    """
+    Conductance-based synapses with exponential rise time tau and decay time tau2.
+    There are two types, excitatory and inhibitory,
+    with different reversal potentials.
+    If the synaptic weight is above zero, initialize an excitatory synapse,
+    else initialize an inhibitory syanpse with abs(weight).
+    """
+
+    def __init__(self, sec, weight, tau1, tau2, loc, e_exc=0.0, e_inh=-80.0):
+        self.tau1 = tau1
+        self.tau2 = tau2
+        self.loc = loc
+        self.e_exc = e_exc
+        self.e_inh = e_inh
+        self.syn = neuron.h.Exp2Syn(sec)
+        self.syn.tau1 = 1000 * self.tau1
+        self.syn.tau2 = 1000 * self.tau2
         self.weight = weight
         if self.weight >= 0.0:
             self.syn.e = self.e_exc
@@ -315,54 +343,71 @@ def build_connection(model, conn):
 
         """
         Given a parcicular connection, labeled by conn.pre,
-        grab the initial decoders, generate locations for synapses,
-        then create a synapse with weight equal to
-        w_ij=np.dot(d_i,alpha_j*e_j)+w_bias, where
-            - d_i is the initial decoder,
-            - e_j is the single bioneuron encoder
-            - w_bias is a weight perturbation that emulates bias
-        Afterwards add synapses to bioneuron.synapses and call neuron.init().
+        repeat the following procedure for each section that the user
+        has specified will be synapsed onto (e.g. apical, tuft, basal dend.)
+            Grab the initial decoders
+            Generate locations for synapses,
+            Create synapses with weight equal to
+            w_ij=np.dot(d_i,alpha_j*e_j)/n_syn, where
+                - d_i is the initial decoder,
+                - e_j is the single bioneuron encoder
+                - alpha_j is the single bioneuron gain
+                - n_syn normalizes total input current for multiple-synapse conns
+            Add synapses to bioneuron.synapses
+        Finally call neuron.init().
         """
-        # initialize synaptic locations and weights
-        syn_loc = get_synaptic_locations(
-            rng,
-            conn_pre.n_neurons,
-            conn_post.n_neurons,
-            conn.syn_sec,
-            conn.n_syn,
-            seed=model.seeds[conn])
-        syn_weights = np.zeros((
-            conn_post.n_neurons,
-            conn_pre.n_neurons,
-            syn_loc.shape[2]))
+        for sec in conn.syn_sec:
+            # todo: warn users about how to specify tau properly
+            # initialize synaptic locations and weights for this section
+            syn_loc = get_synaptic_locations(
+                rng,
+                conn_pre.n_neurons,
+                conn_post.n_neurons,
+                sec,
+                conn.syn_sec[sec]['n_syn'],
+                seed=model.seeds[conn])  # better randomization?
+            syn_weights = np.zeros((
+                conn_post.n_neurons,
+                conn_pre.n_neurons,
+                syn_loc.shape[2]))
 
-        # Grab decoders from the specified solver (usually nengo.solvers.NoSolver(d))
-        eval_points, decoders, solver_info = build_decoders(
-                model, conn, rng, transform)
+            # Grab decoders from the specified solver (usually nengo.solvers.NoSolver(d))
+            eval_points, decoders, solver_info = build_decoders(
+                    model, conn, rng, transform)
 
-        # normalize the area under the ExpSyn curve to compensate for effect of tau
-        times = np.arange(0, 1.0, 0.001)
-        k_norm = np.linalg.norm(np.exp((-times/conn.synapse.tau)),1)
+            # normalize the area under the ExpSyn curve to compensate for effect of tau
+            times = np.arange(0, 1.0, 0.001)
+            k_norm = np.linalg.norm(np.exp((-times/conn.syn_sec[sec]['tau'][0])),1)
 
-        # todo: synaptic gains and encoders
-        neurons = model.params[conn_post.neurons]  # set in build_bioneurons
-        for j, bahl in enumerate(neurons):
-            assert isinstance(bahl, Bahl)
-            loc = syn_loc[j]
-            tau = conn.synapse.tau
-            encoder = conn_post.encoders[j]
-            gain = conn_post.gain[j]
-            bahl.synapses[conn_pre] = np.empty(
-                (loc.shape[0], loc.shape[1]), dtype=object)
-            for pre in range(loc.shape[0]):
-                for syn in range(loc.shape[1]):
-                    section = bahl.cell.apical(loc[pre, syn])
-                    w_ij = np.dot(decoders.T[pre], gain * encoder)
-                    w_ij = w_ij / conn.n_syn / k_norm
-                    syn_weights[j, pre, syn] = w_ij
-                    # todo: support other NEURON synapse types
-                    synapse = ExpSyn(section, w_ij, tau, loc[pre, syn])
-                    bahl.synapses[conn_pre][pre][syn] = synapse
+            # todo: synaptic gains and encoders
+            neurons = model.params[conn_post.neurons]  # set in build_bioneurons
+            for j, bahl in enumerate(neurons):
+                assert isinstance(bahl, Bahl)
+                loc = syn_loc[j]
+                tau = conn.synapse.tau
+                encoder = conn_post.encoders[j]
+                gain = conn_post.gain[j]
+                bahl.synapses[conn_pre] = np.empty(
+                    (loc.shape[0], loc.shape[1]), dtype=object)
+                for pre in range(loc.shape[0]):
+                    for syn in range(loc.shape[1]):
+                        if sec == 'apical':
+                            section = bahl.cell.apical(loc[pre, syn])
+                        elif sec == 'tuft':
+                            section = bahl.cell.tuft(loc[pre, syn])
+                        elif sec == 'basal':
+                            section = bahl.cell.basal(loc[pre, syn])
+                        w_ij = np.dot(decoders.T[pre], gain * encoder)
+                        w_ij = w_ij / conn.syn_sec[sec]['n_syn'] / k_norm
+                        syn_weights[j, pre, syn] = w_ij
+                        if conn.syn_sec[sec]['syn_type'] == 'ExpSyn':
+                            tau = conn.syn_sec[sec]['tau'][0]
+                            synapse = ExpSyn(section, w_ij, tau, loc[pre, syn])
+                        elif conn.syn_sec[sec]['syn_type'] == 'Exp2Syn':
+                            tau1 = conn.syn_sec[sec]['tau'][0]
+                            tau2 = conn.syn_sec[sec]['tau'][1]
+                            synapse = Exp2Syn(section, w_ij, tau1, tau2, loc[pre, syn])
+                        bahl.synapses[conn_pre][pre][syn] = synapse
         neuron.init()
 
         model.add_op(TransmitSpikes(
