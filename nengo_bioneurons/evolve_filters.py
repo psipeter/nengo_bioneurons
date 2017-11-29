@@ -94,21 +94,20 @@ def evolve_h_d_out(
 		x_bio = np.dot(a_bio, d_bio)
 		e_bio = nengo.utils.numpy.rmse(x_target, x_bio)
 
-		if plot:
-			import matplotlib.pyplot as plt
-			figure, ax1 = plt.subplots(1,1)
-			ax1.plot(sim.trange(), x_bio, label='bio, e=%.5f' %e_bio)
-			ax1.plot(sim.trange(), x_target, label='target')
-			ax1.set(xlabel='time (s)', ylabel='activity',
-				title='zeros: %s \npoles: %s' %(zeros, poles))
-			ax1.legend()
-			figure.savefig('plots/ff_decodes.png')  # %id(p_bio_act)
-			figure, ax1 = plt.subplots(1,1)
-			ax1.plot(sim.trange(), a_bio, label='bio')
-			ax1.set(xlabel='time (s)', ylabel='activity',
-				title='zeros: %s \npoles: %s' %(zeros, poles))
-			ax1.legend()
-			figure.savefig('plots/ff_activities.png')  # %id(p_bio_act)
+		import matplotlib.pyplot as plt
+		figure, ax1 = plt.subplots(1,1)
+		ax1.plot(sim.trange(), x_bio, label='bio, e=%.5f' %e_bio)
+		ax1.plot(sim.trange(), x_target, label='target')
+		ax1.set(xlabel='time (s)', ylabel='activity',
+			title='zeros: %s \npoles: %s' %(zeros, poles))
+		ax1.legend()
+		figure.savefig('plots/evolution/evo_decodes.png')  # %id(p_bio_act)
+		figure, ax1 = plt.subplots(1,1)
+		ax1.plot(sim.trange(), a_bio, label='bio')
+		ax1.set(xlabel='time (s)', ylabel='activity',
+			title='zeros: %s \npoles: %s' %(zeros, poles))
+		ax1.legend()
+		figure.savefig('plots/evolution/evo_activities.png')  # %id(p_bio_act)
 
 		return d_bio
 
@@ -181,7 +180,7 @@ def evolve_h_d_out(
 	ax1.plot(np.arange(0, evo_gen), np.array(fit_vs_gen))
 	ax1.set(xlabel='generation', ylabel='fitness')
 	ax1.legend()
-	figure.savefig('plots/evo_fit.png')  #  % id(p_bio_act)
+	figure.savefig('plots/evolution/evo_fit.png')  #  % id(p_bio_act)
 	figure, ax1 = plt.subplots(1,1)
 	times = np.arange(0, 1e0, 1e-3)
 	ax1.plot(times, build_filter(best_zeros, best_poles).impulse(len(times)), label='evolved')
@@ -191,8 +190,8 @@ def evolve_h_d_out(
 	figure.savefig('plots/evolution/evo_filt.png')  #  % id(p_bio_act)
 
 	np.savez(training_dir+training_file,
-		zeros_feedforward=best_zeros,
-		poles_feedforward=best_poles,
-		d_feedforward=best_d_bio)
+		zeros=best_zeros,
+		poles=best_poles,
+		decoders=best_d_bio)
 
 	return best_zeros, best_poles, best_d_bio

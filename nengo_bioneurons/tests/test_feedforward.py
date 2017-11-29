@@ -2,17 +2,19 @@ import numpy as np
 import nengo
 from nengo_bioneurons import BahlNeuron, build_filter, evolve_h_d_out
 
-def test_basic_readout(Simulator, plt):
+def test_basic_ff(Simulator, plt):
 	pre_neurons = 100
 	bio_neurons = 10
 	dt = 0.001
 	tau = 0.05
+	tau2 = 0.05
 	radius = 1
-	n_syn = 1
+	n_syn = 5
 	t_train = 3.0
 	t_test = 3.0
 	dim = 1
 	sig_freq = 2 * np.pi
+	white_noise_freq = 5
 	d_out = np.zeros((bio_neurons, dim))
 
 	network_seed = 1
@@ -69,8 +71,7 @@ def test_basic_readout(Simulator, plt):
 				synapse=None,
 				seed=conn_seed)
 			pre_bio = nengo.Connection(pre, bio,
-				synapse=tau,
-				n_syn=n_syn,
+				syn_sec={'apical': {'n_syn': n_syn, 'syn_type': 'Exp2Syn', 'tau': [tau, tau2]}},
 				seed=conn_seed)
 			pre_lif = nengo.Connection(pre, lif,
 				synapse=tau,
@@ -111,11 +112,15 @@ def test_basic_readout(Simulator, plt):
 
 	import matplotlib.pyplot as plt
 	fig, ax = plt.subplots(1, 1)
+	ax.plot(sim.trange(), a_bio, label='bio')
+	fig.savefig('plots/basic_ff_train_activities')
+
+	fig, ax = plt.subplots(1, 1)
 	ax.plot(sim.trange(), x_bio, label='bio, e=%.5f' %e_bio)
 	ax.plot(sim.trange(), x_lif, label='lif, e=%.5f' %e_lif)
 	ax.plot(sim.trange(), x_target, label='target')
 	ax.legend()
-	fig.savefig('plots/basic_feedforward_train')
+	fig.savefig('plots/basic_ff_train')
 
 	''' TEST '''
 	network = make_network(
@@ -124,8 +129,8 @@ def test_basic_readout(Simulator, plt):
 		sim_seed,
 		ens_seed,
 		conn_seed,
-		'cos',
-		sig_freq,
+		'white_noise',
+		white_noise_freq,
 		sig_seed)
 	with Simulator(network, seed=sim_seed, dt=dt) as sim:
 		sim.run(t_test)
@@ -141,16 +146,17 @@ def test_basic_readout(Simulator, plt):
 	ax.plot(sim.trange(), x_lif, label='lif, e=%.5f' %e_lif)
 	ax.plot(sim.trange(), x_target, label='target')
 	ax.legend()
-	fig.savefig('plots/basic_feedforward_test')
+	fig.savefig('plots/basic_ff_test')
 
 
-def test_evolved_feedforward(Simulator, plt):
+def test_evolved_ff(Simulator, plt):
 	pre_neurons = 100
 	bio_neurons = 10
 	dt = 0.001
 	tau = 0.05
+	tau2 = 0.02
 	radius = 1
-	n_syn = 1
+	n_syn = 5
 	t_train = 5.0
 	t_test = 5.0
 	dim = 1
@@ -210,8 +216,8 @@ def test_evolved_feedforward(Simulator, plt):
 				dimensions=dim,
 				radius=radius,
 				# encoders=nengo.dists.Uniform(-1e0,1e0),
-				# gain=nengo.dists.Uniform(-2e2,2e2),
-				# bias=nengo.dists.Uniform(-1e0,1e0),
+				gain=nengo.dists.Uniform(-5e1,5e1),
+				bias=nengo.dists.Uniform(-2e0,2e0),
 				neuron_type=BahlNeuron(),
 				seed=ens_seed)
 			lif = nengo.Ensemble(
@@ -226,8 +232,7 @@ def test_evolved_feedforward(Simulator, plt):
 				synapse=None,
 				seed=conn_seed)
 			pre_bio = nengo.Connection(pre, bio,
-				synapse=tau,
-				n_syn=n_syn,
+				syn_sec={'apical': {'n_syn': n_syn, 'syn_type': 'Exp2Syn', 'tau': [tau2, tau]}},
 				seed=conn_seed)
 			pre_lif = nengo.Connection(pre, lif,
 				synapse=tau,

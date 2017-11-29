@@ -4,12 +4,12 @@ from nengo_bioneurons import BahlNeuron
 
 def test_connection_multi_synapse_section(Simulator, plt):
 	pre_neurons = 100
-	bio_neurons = 30
-	tau = 0.01
-	tau2 = 0.02
+	bio_neurons = 10
+	tau = 0.05
+	tau2 = 0.05
 	radius = 1
-	n_syn = 5
-	n_syn2 = 3
+	n_syn = 3
+	n_syn2 = 5
 	n_syn3 = 7
 	t_test = 10.0
 	dim = 1
@@ -46,9 +46,9 @@ def test_connection_multi_synapse_section(Simulator, plt):
 			synapse=tau)
 		pre_bio = nengo.Connection(pre, bio,
 			syn_sec={
-				'apical': {'n_syn': n_syn, 'syn_type': 'ExpSyn', 'tau': [tau]},
+				# 'apical': {'n_syn': n_syn, 'syn_type': 'Exp2Syn', 'tau': [tau, tau2]},
 				'tuft': {'n_syn': n_syn2, 'syn_type': 'Exp2Syn', 'tau': [tau, tau2]},
-				'basal': {'n_syn': n_syn3, 'syn_type': 'ExpSyn', 'tau': [tau]},
+				# 'basal': {'n_syn': n_syn3, 'syn_type': 'Exp2Syn', 'tau': [tau, tau2]},
 			})
 		pre_lif = nengo.Connection(pre, lif,
 			synapse=tau)
