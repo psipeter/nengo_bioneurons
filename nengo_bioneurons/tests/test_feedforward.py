@@ -7,7 +7,7 @@ def test_basic_ff(Simulator, plt):
 	bio_neurons = 10
 	dt = 0.001
 	tau = 0.05
-	tau2 = 0.05
+	tau_rise = 0.01
 	radius = 1
 	n_syn = 5
 	t_train = 3.0
@@ -71,7 +71,10 @@ def test_basic_ff(Simulator, plt):
 				synapse=None,
 				seed=conn_seed)
 			pre_bio = nengo.Connection(pre, bio,
-				syn_sec={'apical': {'n_syn': n_syn, 'syn_type': 'Exp2Syn', 'tau': [tau, tau2]}},
+				sec='tuft',
+				n_syn=n_syn,
+				syn_type='Exp2Syn',
+				tau_list=[tau_rise, tau],
 				seed=conn_seed)
 			pre_lif = nengo.Connection(pre, lif,
 				synapse=tau,
@@ -80,11 +83,11 @@ def test_basic_ff(Simulator, plt):
 				synapse=tau)
 
 			network.p_stim = nengo.Probe(stim)
-			network.p_pre_act = nengo.Probe(pre.neurons, 'spikes', synapse=nengo.Lowpass(tau))
+			network.p_pre_act = nengo.Probe(pre.neurons, 'spikes', synapse=tau)
 			network.p_pre = nengo.Probe(pre, synapse=tau)
-			network.p_bio_act = nengo.Probe(bio.neurons, 'spikes', synapse=nengo.Lowpass(tau))
+			network.p_bio_act = nengo.Probe(bio.neurons, 'spikes', synapse=tau)
 			network.p_bio = nengo.Probe(bio, synapse=tau, solver=nengo.solvers.NoSolver(d_out))
-			network.p_lif_act = nengo.Probe(lif.neurons, 'spikes', synapse=nengo.Lowpass(tau))
+			network.p_lif_act = nengo.Probe(lif.neurons, 'spikes', synapse=tau)
 			network.p_lif = nengo.Probe(lif, synapse=tau)
 			network.p_target = nengo.Probe(target, synapse=tau)
 
@@ -154,13 +157,13 @@ def test_evolved_ff(Simulator, plt):
 	bio_neurons = 10
 	dt = 0.001
 	tau = 0.05
-	tau2 = 0.02
+	tau_rise = 0.02
 	radius = 1
 	n_syn = 5
-	t_train = 5.0
-	t_test = 5.0
+	t_train = 3.0
+	t_test = 3.0
 	dim = 1
-	sig_freq = np.pi
+	sig_freq = 2 * np.pi
 	d_out = np.zeros((bio_neurons, dim))
 
 	network_seed = 1
@@ -170,7 +173,7 @@ def test_evolved_ff(Simulator, plt):
 	sig_seed = 5
 	evo_seed = 6
 
-	t_evo = 5.0
+	t_evo = 3.0
 	n_threads = 10
 	evo_popsize = 10
 	evo_gen = 10
@@ -232,7 +235,10 @@ def test_evolved_ff(Simulator, plt):
 				synapse=None,
 				seed=conn_seed)
 			pre_bio = nengo.Connection(pre, bio,
-				syn_sec={'apical': {'n_syn': n_syn, 'syn_type': 'Exp2Syn', 'tau': [tau2, tau]}},
+				sec='tuft',
+				n_syn=n_syn,
+				syn_type='Exp2Syn',
+				tau_list=[tau_rise, tau],
 				seed=conn_seed)
 			pre_lif = nengo.Connection(pre, lif,
 				synapse=tau,

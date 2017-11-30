@@ -2,7 +2,7 @@ import numpy as np
 import nengo
 from nengolib.signal import s
 from nengolib.synapses import Lowpass  #, DoubleExp
-from nengo_bioneurons import BahlNeuron, build_filter, evolve_h_d_out, test_rates
+from nengo_bioneurons import BahlNeuron, build_filter, evolve_h_d_out, make_tuning_curves
 
 def test_fb_doubleexp(Simulator, plt):
 	pre_neurons = 100
@@ -35,7 +35,7 @@ def test_fb_doubleexp(Simulator, plt):
 	t_evo = 10.0  # 10.0
 	n_threads = 10
 	evo_popsize = 10
-	evo_gen = 3  # 4
+	evo_gen = 7  # 4
 	zeros_init = []
 	poles_init = [-1e2, -1e2]
 	zeros_delta = []
@@ -48,8 +48,8 @@ def test_fb_doubleexp(Simulator, plt):
 		'_%s_bioneurons_%s_t_evo_%s_evo_popsize_%s_evo_gen'\
 		%(bio_neurons, t_evo, evo_popsize, evo_gen)
 
-	inter_type = BahlNeuron()  # nengo.AdaptiveLIF(tau_n=0.1, inc_n=0.01)  #  
-	bio_type = BahlNeuron()  # nengo.AdaptiveLIF(tau_n=0.1, inc_n=0.01)  #  
+	inter_type = nengo.AdaptiveLIF(tau_n=0.1, inc_n=0.01)  #  BahlNeuron()  # 
+	bio_type = nengo.AdaptiveLIF(tau_n=0.1, inc_n=0.01)  #  BahlNeuron()  # 
 
 	def make_network(
 		d_bio_out,
@@ -121,7 +121,10 @@ def test_fb_doubleexp(Simulator, plt):
 				synapse=None,
 				seed=conn_seed)
 			pre_bio = nengo.Connection(pre, bio,
-				syn_sec={'tuft': {'n_syn': n_syn, 'syn_type': 'Exp2Syn', 'tau': [tau, tau]}},
+				sec='tuft',
+				n_syn=n_syn,
+				syn_type='ExpSyn',
+				tau_list=[tau],
 				transform=tau,
 				seed=conn_seed)
 			pre_lif = nengo.Connection(pre, lif,
@@ -132,8 +135,10 @@ def test_fb_doubleexp(Simulator, plt):
 				synapse=1/s,  # compute integral
 				seed=conn_seed)
 			pre2_inter = nengo.Connection(pre2, inter,
-				syn_sec={'tuft': {'n_syn': n_syn, 'syn_type': 'Exp2Syn', 'tau': [tau, tau]}},
-				synapse=0.01,  # todo: account for this filter in target
+				sec='tuft',
+				n_syn=n_syn,
+				syn_type='Exp2Syn',
+				tau_list=[0.01, 0.01],  # todo: account for this filter in target
 				seed=conn_seed)
 			# stim_inter = nengo.Connection(stim, inter,
 			# 	synapse=1/s,
@@ -142,18 +147,22 @@ def test_fb_doubleexp(Simulator, plt):
 				synapse=1/s)
 
 			inter_bio = nengo.Connection(inter, bio,
-				syn_sec={'tuft': {'n_syn': n_syn,
-									'syn_type': 'Exp2Syn',
-									'tau': [tau_rise_inter_bio, tau_fall_inter_bio]}},
+				sec='tuft',
+				n_syn=n_syn,
+				syn_type='Exp2Syn',
+				tau_list=[tau_rise_inter_bio, tau_fall_inter_bio],
+				# syn_locs=syn_locs,
 				# synapse=DoubleExp(tau_rise_inter_bio, tau_fall_inter_bio),  # for alif testing
 				synapse=build_filter([], [-1.0/tau_rise_inter_bio, -1.0/tau_fall_inter_bio]),  # for alif testing
 				transform=T_inter_bio,		
 				solver=nengo.solvers.NoSolver(d_inter_bio),
 				seed=conn_seed)
 			bio_bio = nengo.Connection(bio, bio,
-				syn_sec={'tuft': {'n_syn': n_syn,
-									'syn_type': 'Exp2Syn',
-									'tau': [tau_rise_bio_bio, tau_fall_bio_bio]}},
+				sec='tuft',
+				n_syn=n_syn,
+				syn_type='Exp2Syn',
+				tau_list=[tau_rise_bio_bio, tau_fall_bio_bio],
+				# syn_locs=syn_locs,
 				# synapse=DoubleExp(tau_rise_bio_bio, tau_fall_bio_bio),  # for alif testing
 				synapse=build_filter([], [-1.0/tau_rise_bio_bio, -1.0/tau_fall_bio_bio]),  # for alif testing
 				transform=T_bio_bio,
@@ -290,14 +299,13 @@ def test_fb_doubleexp(Simulator, plt):
 		inter_type,
 		bio_type=nengo.LIF())
 
-	test_rates(network,
-		Simulator,
-		sim_seed,
-		'inter',
-		network.p_pre2,
-		network.p_inter_act,
-		t_test=10.0)
-	assert False
+	# test_rates(network,
+	# 	Simulator,
+	# 	sim_seed,
+	# 	'inter',
+	# 	network.p_pre2,
+	# 	network.p_inter_act,
+	# 	t_test=10.0)
 
 	with Simulator(network, seed=sim_seed, dt=dt) as sim:
 		sim.run(t_train)

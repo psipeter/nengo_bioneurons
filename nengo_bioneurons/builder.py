@@ -1,5 +1,5 @@
 import numpy as np
-
+import warnings
 import neuron
 
 import nengo
@@ -14,7 +14,7 @@ from nengo.builder.operator import Copy
 
 from nengo_bioneurons.bahl_neuron import BahlNeuron
 
-__all__ = ['test_rates']
+__all__ = ['make_tuning_curves']
 
 
 class Bahl(object):
@@ -293,7 +293,8 @@ def build_bias(model, bioensemble, biases):
             (loc.shape[0], loc.shape[1]), dtype=object)
         for pre in range(loc.shape[0]):
             for syn in range(loc.shape[1]):
-                section = bahl.cell.apical(loc[pre, syn])
+                section = bahl.cell.tuft(loc[pre, syn])
+                # section = bahl.cell.apical(loc[pre, syn])
                 # w_ij = np.dot(decoders[pre], gain * encoder)
                 w_ij = bias_decoders[pre, j]
                 syn_weights[j, pre, syn] = w_ij
@@ -347,68 +348,65 @@ def build_connection(model, conn):
 
         """
         Given a parcicular connection, labeled by conn.pre,
-        repeat the following procedure for each section that the user
-        has specified will be synapsed onto (e.g. apical, tuft, basal dend.)
-            Grab the initial decoders
-            Generate locations for synapses,
-            Create synapses with weight equal to
-            w_ij=np.dot(d_i,alpha_j*e_j)/n_syn, where
-                - d_i is the initial decoder,
-                - e_j is the single bioneuron encoder
-                - alpha_j is the single bioneuron gain
-                - n_syn normalizes total input current for multiple-synapse conns
-            Add synapses to bioneuron.synapses
+        Grab the initial decoders
+        Generate locations for synapses,
+        Create synapses with weight equal to
+        w_ij=np.dot(d_i,alpha_j*e_j)/n_syn, where
+            - d_i is the initial decoder,
+            - e_j is the single bioneuron encoder
+            - alpha_j is the single bioneuron gain
+            - n_syn normalizes total input current for multiple-synapse conns
+        Add synapses to bioneuron.synapses
         Finally call neuron.init().
         """
-        for sec in conn.syn_sec:
-            # todo: warn users about how to specify tau properly
-            # initialize synaptic locations and weights for this section
-            syn_loc = get_synaptic_locations(
+        if conn.syn_locs is None:
+            conn.syn_locs = get_synaptic_locations(
                 rng,
                 conn_pre.n_neurons,
                 conn_post.n_neurons,
-                conn.syn_sec[sec]['n_syn'])
-            syn_weights = np.zeros((
+                conn.n_syn)
+        if conn.syn_weights is None:
+            conn.syn_weights = np.zeros((
                 conn_post.n_neurons,
                 conn_pre.n_neurons,
-                syn_loc.shape[2]))
+                conn.syn_locs.shape[2]))
 
-            # Grab decoders from the specified solver (usually nengo.solvers.NoSolver(d))
-            eval_points, decoders, solver_info = build_decoders(
-                    model, conn, rng, transform)
+        # Grab decoders from the specified solver (usually nengo.solvers.NoSolver(d))
+        eval_points, decoders, solver_info = build_decoders(
+                model, conn, rng, transform)
 
-            # normalize the area under the ExpSyn curve to compensate for effect of tau
-            times = np.arange(0, 1.0, 0.001)
-            k_norm = np.linalg.norm(np.exp((-times/conn.syn_sec[sec]['tau'][0])),1)
+        # normalize the area under the ExpSyn curve to compensate for effect of tau
+        times = np.arange(0, 1.0, 0.001)
+        k_norm = np.linalg.norm(np.exp((-times/conn.tau_list[0])),1)
 
-            # todo: synaptic gains and encoders
-            neurons = model.params[conn_post.neurons]  # set in build_bioneurons
-            for j, bahl in enumerate(neurons):
-                assert isinstance(bahl, Bahl)
-                loc = syn_loc[j]
-                encoder = conn_post.encoders[j]
-                gain = conn_post.gain[j]
-                bahl.synapses[conn_pre] = np.empty(
-                    (loc.shape[0], loc.shape[1]), dtype=object)
-                for pre in range(loc.shape[0]):
-                    for syn in range(loc.shape[1]):
-                        if sec == 'apical':
-                            section = bahl.cell.apical(loc[pre, syn])
-                        elif sec == 'tuft':
-                            section = bahl.cell.tuft(loc[pre, syn])
-                        elif sec == 'basal':
-                            section = bahl.cell.basal(loc[pre, syn])
-                        w_ij = np.dot(decoders.T[pre], gain * encoder)
-                        w_ij = w_ij / conn.syn_sec[sec]['n_syn'] / k_norm
-                        syn_weights[j, pre, syn] = w_ij
-                        if conn.syn_sec[sec]['syn_type'] == 'ExpSyn':
-                            tau = conn.syn_sec[sec]['tau'][0]
-                            synapse = ExpSyn(section, w_ij, tau, loc[pre, syn])
-                        elif conn.syn_sec[sec]['syn_type'] == 'Exp2Syn':
-                            tau1 = conn.syn_sec[sec]['tau'][0]
-                            tau2 = conn.syn_sec[sec]['tau'][1]
-                            synapse = Exp2Syn(section, w_ij, tau1, tau2, loc[pre, syn])
-                        bahl.synapses[conn_pre][pre][syn] = synapse
+        # todo: synaptic gains and encoders
+        neurons = model.params[conn_post.neurons]  # set in build_bioneurons
+        for j, bahl in enumerate(neurons):
+            assert isinstance(bahl, Bahl)
+            loc = conn.syn_locs[j]
+            encoder = conn_post.encoders[j]
+            gain = conn_post.gain[j]
+            bahl.synapses[conn_pre] = np.empty(
+                (loc.shape[0], loc.shape[1]), dtype=object)
+            for pre in range(loc.shape[0]):
+                for syn in range(loc.shape[1]):
+                    if conn.sec == 'apical':
+                        section = bahl.cell.apical(loc[pre, syn])
+                    elif conn.sec == 'tuft':
+                        section = bahl.cell.tuft(loc[pre, syn])
+                    elif conn.sec == 'basal':
+                        section = bahl.cell.basal(loc[pre, syn])
+                    w_ij = np.dot(decoders.T[pre], gain * encoder)
+                    w_ij = w_ij / conn.n_syn / k_norm
+                    conn.syn_weights[j, pre, syn] = w_ij
+                    if conn.syn_type == 'ExpSyn':
+                        tau = conn.tau_list[0]
+                        synapse = ExpSyn(section, w_ij, tau, loc[pre, syn])
+                    elif conn.syn_type == 'Exp2Syn':
+                        tau1 = conn.tau_list[0]
+                        tau2 = conn.tau_list[1]
+                        synapse = Exp2Syn(section, w_ij, tau1, tau2, loc[pre, syn])
+                    bahl.synapses[conn_pre][pre][syn] = synapse
         neuron.init()
 
         model.add_op(TransmitSpikes(
@@ -417,9 +415,7 @@ def build_connection(model, conn):
         model.params[conn] = BuiltConnection(eval_points=eval_points,
                                              solver_info=solver_info,
                                              transform=transform,
-                                             weights=syn_weights)
-        # todo: test if computed weights produce
-        # heterogeneous tuning curves with plausible firing rates
+                                             weights=conn.syn_weights)
 
     else:  # normal connection
         return nengo.builder.connection.build_connection(model, conn)
@@ -446,18 +442,19 @@ def get_synaptic_locations(rng, pre_neurons, n_neurons, n_syn):
     syn_locations = rng.uniform(0, 1, size=(n_neurons, pre_neurons, n_syn))
     return syn_locations
 
-def test_rates(network, Simulator, sim_seed, label, p_pre, p_bio_act, t_test):
-    import warnings
+def make_tuning_curves(network, Simulator, sim_seed, label, p_pre, p_bio_act, t_test):
     min_rate = 10
     max_rate = 100
 
     with Simulator(network, seed=sim_seed) as sim:
         sim.run(t_test)
 
+    encoders = None
     for ens in network.ensembles:
         if ens.label == label:
             encoders = sim.data[ens].encoders
             break
+    assert encoders is not None, "please set label='bio' on the test ensemble"
 
     import matplotlib.pyplot as plt
     fig, ax = plt.subplots(1, 1)
@@ -495,4 +492,4 @@ def test_rates(network, Simulator, sim_seed, label, p_pre, p_bio_act, t_test):
             warnings.warn('warning: neuron %s under min_rate' %i)
 
     ax.legend()
-    fig.savefig('plots/test_rates.png')
+    fig.savefig('plots/tuning_curves.png')
