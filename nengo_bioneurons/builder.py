@@ -14,7 +14,7 @@ from nengo.builder.operator import Copy
 
 from nengo_bioneurons.bahl_neuron import BahlNeuron
 
-__all__ = []
+__all__ = ['test_rates']
 
 
 class Bahl(object):
@@ -205,7 +205,9 @@ def build_bioneurons(model, neuron_type, neurons):
     # However, setting them like 'neurons' are set below may not be possible
     # because these attributes are used in more places in the build process.
     rng = np.random.RandomState(seed=ens.seed)
-    if hasattr(ens, 'encoders') and ens.encoders is not None:
+    if (hasattr(ens, 'encoders')
+            and ens.encoders is not None
+            and not isinstance(ens.encoders, np.ndarray)):
         ens.encoders = nengo.dists.get_samples(ens.encoders, ens.n_neurons, ens.dimensions, rng)
     else:
         ens.encoders = gen_encoders(
@@ -213,7 +215,9 @@ def build_bioneurons(model, neuron_type, neurons):
             ens.dimensions,
             ens.radius,
             rng)
-    if hasattr(ens, 'gain') and ens.gain is not None:
+    if (hasattr(ens, 'gain')
+            and ens.gain is not None
+            and not isinstance(ens.gain, np.ndarray)):
         ens.gain = nengo.dists.get_samples(ens.gain, ens.n_neurons, 1, rng)[:,0]
     else:
         ens.gain = gen_gains(
@@ -221,7 +225,9 @@ def build_bioneurons(model, neuron_type, neurons):
             ens.dimensions,
             ens.radius,
             rng)
-    if hasattr(ens, 'bias') and ens.bias is not None:
+    if (hasattr(ens, 'bias')
+            and ens.bias is not None
+            and not isinstance(ens.bias, np.ndarray)):
         ens.bias = nengo.dists.get_samples(ens.bias, ens.n_neurons, 1, rng)[:,0]
     else:
         ens.bias = gen_biases(
@@ -439,3 +445,54 @@ def get_synaptic_locations(rng, pre_neurons, n_neurons, n_syn):
     # unique locations per connection and per bioneuron (uses conn's rng)
     syn_locations = rng.uniform(0, 1, size=(n_neurons, pre_neurons, n_syn))
     return syn_locations
+
+def test_rates(network, Simulator, sim_seed, label, p_pre, p_bio_act, t_test):
+    import warnings
+    min_rate = 10
+    max_rate = 100
+
+    with Simulator(network, seed=sim_seed) as sim:
+        sim.run(t_test)
+
+    for ens in network.ensembles:
+        if ens.label == label:
+            encoders = sim.data[ens].encoders
+            break
+
+    import matplotlib.pyplot as plt
+    fig, ax = plt.subplots(1, 1)
+
+    n_eval_points = 20
+    xhat_pre = sim.data[p_pre]
+    act_bio = sim.data[p_bio_act]
+    for i in range(sim.data[p_bio_act].shape[1]):
+        x_dot_e = np.dot(
+            xhat_pre,
+            np.sign(encoders[i]))
+        x_dot_e_vals = np.linspace(
+            np.min(x_dot_e),
+            np.max(x_dot_e), 
+            num=n_eval_points)
+        Hz_mean = np.zeros((x_dot_e_vals.shape[0]))
+        Hz_stddev = np.zeros_like(Hz_mean)
+
+        for xi in range(x_dot_e_vals.shape[0] - 1):
+            ts_greater = np.where(x_dot_e_vals[xi] < xhat_pre)[0]
+            ts_smaller = np.where(xhat_pre < x_dot_e_vals[xi + 1])[0]
+            ts = np.intersect1d(ts_greater, ts_smaller)
+            if ts.shape[0] > 0: Hz_mean[xi] = np.average(act_bio[ts, i])
+            if ts.shape[0] > 1: Hz_stddev[xi] = np.std(act_bio[ts, i])
+
+        bioplot = ax.plot(x_dot_e_vals[:-2], Hz_mean[:-2], label='%s' %i)
+        ax.fill_between(x_dot_e_vals[:-2],
+            Hz_mean[:-2]+Hz_stddev[:-2],
+            Hz_mean[:-2]-Hz_stddev[:-2],
+            alpha=0.5)
+
+        if np.any(Hz_mean[:-2]+Hz_stddev[:-2] > max_rate):
+            warnings.warn('warning: neuron %s over max_rate' %i)
+        if np.all(Hz_mean[:-2]+Hz_stddev[:-2] < min_rate):
+            warnings.warn('warning: neuron %s under min_rate' %i)
+
+    ax.legend()
+    fig.savefig('plots/test_rates.png')
