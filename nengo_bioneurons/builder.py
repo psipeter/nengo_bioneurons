@@ -14,7 +14,7 @@ from nengo.builder.operator import Copy
 
 from nengo_bioneurons.bahl_neuron import BahlNeuron
 
-__all__ = ['make_tuning_curves']
+__all__ = ['plot_tuning_curves']
 
 
 class Bahl(object):
@@ -22,7 +22,8 @@ class Bahl(object):
 
     def __init__(self):
         super(Bahl, self).__init__()
-        self.synapses = {}
+        self.synapses = {}  # stores NEURON synapse objects
+        self.syn_weights = {}  # stores weight matrix, for updating in real-time
         self.cell = neuron.h.Bahl()
         self.v_record = neuron.h.Vector()
         self.v_record.record(self.cell.soma(0.5)._ref_v)
@@ -75,6 +76,14 @@ class ExpSyn(object):
         self.spike_in = neuron.h.NetCon(None, self.syn)        
         self.spike_in.weight[0] = abs(self.weight)
 
+    def update_weight(self, w_new):
+        self.weight = w_new
+        if self.weight >= 0.0:
+            self.syn.e = self.e_exc
+        else:
+            self.syn.e = self.e_inh
+        self.spike_in.weight[0] = abs(self.weight)
+
 
 class Exp2Syn(object):
     """
@@ -103,6 +112,13 @@ class Exp2Syn(object):
         self.spike_in = neuron.h.NetCon(None, self.syn)        
         self.spike_in.weight[0] = abs(self.weight)
 
+    def update_weight(self, w_new):
+        self.weight = w_new
+        if self.weight >= 0.0:
+            self.syn.e = self.e_exc
+        else:
+            self.syn.e = self.e_inh
+        self.spike_in.weight[0] = abs(self.weight)
 
 class SimBioneuron(Operator):
     """
@@ -172,7 +188,9 @@ class TransmitSpikes(Operator):
                 num_spikes = int(spikes[n]*dt + 1e-9)
                 for _ in range(num_spikes):
                     for nrn in self.neurons:
-                        for syn in nrn.synapses[self.ens_pre][n]:
+                        for j, syn in enumerate(nrn.synapses[self.ens_pre][n]):
+                            # update synaptic weight if learning rule is on
+                            syn.update_weight(nrn.syn_weights[self.ens_pre][n, j])
                             syn.spike_in.event(t_neuron)
         return step
 
@@ -234,7 +252,8 @@ def build_bioneurons(model, neuron_type, neurons):
             ens.n_neurons,
             ens.dimensions,
             ens.radius,
-            rng)
+            rng,
+            method='decode')
 
     model.add_op(op)
 
@@ -242,10 +261,9 @@ def build_bioneurons(model, neuron_type, neurons):
     model.params[neurons] = bioneurons
 
     # Build a bias-emulating connection
-    build_bias(model, ens, ens.bias)
+    build_bias(model, ens, ens.bias, method='decode')
 
-
-def build_bias(model, bioensemble, biases):
+def build_bias(model, bioensemble, biases, method='decode'):
     rng = np.random.RandomState(bioensemble.seed)
     neurons_lif = 100
     neurons_bio = bioensemble.n_neurons
@@ -255,7 +273,7 @@ def build_bias(model, bioensemble, biases):
             neuron_type=nengo.LIF(),
             dimensions=1,
             n_neurons=neurons_lif,
-            # seed=bioensemble.seed,
+            seed=bioensemble.seed,
             add_to_container=False)
     model.seeds[lif] = bioensemble.seed  # seeds normally set early in builder
     model.build(lif)  # add to the model
@@ -278,6 +296,12 @@ def build_bias(model, bioensemble, biases):
         neurons_bio,
         neurons_lif,
         syn_loc.shape[2]))
+    if method == 'weights':
+        for b in range(syn_weights.shape[0]):
+            mean_bias = biases[b]
+            # arbitrary heuistic for sigma, but must be nonzero
+            std_bias = (np.max(biases) - np.min(biases)) / 10 + 1e-10
+            syn_weights[b] = rng.normal(mean_bias, std_bias, size=syn_weights[b].shape)
 
     # unit test that synapse and weight arrays are compatible shapes
     if not syn_loc.shape[:-1] == bias_decoders.T.shape:
@@ -296,10 +320,12 @@ def build_bias(model, bioensemble, biases):
                 section = bahl.cell.tuft(loc[pre, syn])
                 # section = bahl.cell.apical(loc[pre, syn])
                 # w_ij = np.dot(decoders[pre], gain * encoder)
-                w_ij = bias_decoders[pre, j]
-                syn_weights[j, pre, syn] = w_ij
+                if method == 'decode':
+                    syn_weights[j, pre, syn] = bias_decoders[pre, j]
+                w_ij = syn_weights[j, pre, syn]
                 synapse = ExpSyn(section, w_ij, tau, loc[pre, syn])
                 bahl.synapses[lif][pre][syn] = synapse
+        bahl.syn_weights[lif] = syn_weights[j]  # for updating weights real-time
     neuron.init()
 
     model.add_op(TransmitSpikes(
@@ -324,6 +350,7 @@ def build_connection(model, conn):
 
     conn_pre = deref_objview(conn.pre)
     conn_post = deref_objview(conn.post)
+    rng = np.random.RandomState(model.seeds[conn])
 
     if isinstance(conn_pre, nengo.Ensemble) and \
             isinstance(conn_pre.neuron_type, BahlNeuron):
@@ -333,19 +360,13 @@ def build_connection(model, conn):
                             " (got %s from %s to %s)" 
                             % (conn.solver, conn_pre, conn_post))
 
-    if isinstance(conn_post, nengo.Ensemble) and \
-       isinstance(conn_post.neuron_type, BahlNeuron):
-        # TODO: other error handling?
-        # TODO: detect this earlier inside BioConnection __init__
+    if (isinstance(conn_post, nengo.Ensemble) and \
+            isinstance(conn_post.neuron_type, BahlNeuron)):
+
         if not isinstance(conn_pre, nengo.Ensemble) or \
                 'spikes' not in conn_pre.neuron_type.probeable:
             raise BuildError("May only connect spiking neurons (pre=%s) to "
                              "bioneurons (post=%s)" % (conn_pre, conn_post))
-
-        rng = np.random.RandomState(model.seeds[conn])
-        model.sig[conn]['in'] = model.sig[conn_pre]['out']
-        transform = full_transform(conn, slice_pre=False)
-
         """
         Given a parcicular connection, labeled by conn.pre,
         Grab the initial decoders
@@ -365,13 +386,16 @@ def build_connection(model, conn):
                 conn_pre.n_neurons,
                 conn_post.n_neurons,
                 conn.n_syn)
+        syn_flag = False
         if conn.syn_weights is None:
+            syn_flag = True  
             conn.syn_weights = np.zeros((
                 conn_post.n_neurons,
                 conn_pre.n_neurons,
                 conn.syn_locs.shape[2]))
 
         # Grab decoders from the specified solver (usually nengo.solvers.NoSolver(d))
+        transform = full_transform(conn, slice_pre=False)
         eval_points, decoders, solver_info = build_decoders(
                 model, conn, rng, transform)
 
@@ -380,6 +404,7 @@ def build_connection(model, conn):
         k_norm = np.linalg.norm(np.exp((-times/conn.tau_list[0])),1)
 
         # todo: synaptic gains and encoders
+        # print conn, conn_post.gain, conn.post.encoders
         neurons = model.params[conn_post.neurons]  # set in build_bioneurons
         for j, bahl in enumerate(neurons):
             assert isinstance(bahl, Bahl)
@@ -396,17 +421,22 @@ def build_connection(model, conn):
                         section = bahl.cell.tuft(loc[pre, syn])
                     elif conn.sec == 'basal':
                         section = bahl.cell.basal(loc[pre, syn])
-                    w_ij = np.dot(decoders.T[pre], gain * encoder)
-                    w_ij = w_ij / conn.n_syn / k_norm
-                    conn.syn_weights[j, pre, syn] = w_ij
+                    if syn_flag:  # syn_weights should be set by dec_pre and bio encoders/gain
+                        w_ij = np.dot(decoders.T[pre], gain * encoder)
+                        w_ij = w_ij / conn.n_syn / k_norm
+                        conn.syn_weights[j, pre, syn] = w_ij
+                    else:  # syn_weights already specified (precalculated or learning rule)
+                        w_ij = conn.syn_weights[j, pre, syn]
                     if conn.syn_type == 'ExpSyn':
                         tau = conn.tau_list[0]
                         synapse = ExpSyn(section, w_ij, tau, loc[pre, syn])
                     elif conn.syn_type == 'Exp2Syn':
+                        assert len(conn.tau_list) == 2, 'Exp2Syn requires tau_rise, tau_fall'
                         tau1 = conn.tau_list[0]
                         tau2 = conn.tau_list[1]
                         synapse = Exp2Syn(section, w_ij, tau1, tau2, loc[pre, syn])
                     bahl.synapses[conn_pre][pre][syn] = synapse
+            bahl.syn_weights[conn_pre] = conn.syn_weights[j]  # for updating weights real-time
         neuron.init()
 
         model.add_op(TransmitSpikes(
@@ -426,12 +456,15 @@ def gen_encoders(n_neurons, dimensions, radius, rng):
     return encoders.astype(float)
 
 def gen_gains(n_neurons, dimensions, radius, rng):
-    gain_mag = 1e2 * radius
+    gain_mag = 2e2 * radius
     gains = rng.uniform(-gain_mag, gain_mag, size=n_neurons)
     return gains
 
-def gen_biases(n_neurons, dimensions, radius, rng):
-    bias_mag = 3e0 * radius
+def gen_biases(n_neurons, dimensions, radius, rng, method='decode'):
+    if method == 'decode':
+        bias_mag = 5e1 * radius
+    elif method == 'weights':
+        bias_mag = 5e-3 * radius
     biases = rng.uniform(-bias_mag, bias_mag, size=n_neurons)
     return biases
 
@@ -442,27 +475,18 @@ def get_synaptic_locations(rng, pre_neurons, n_neurons, n_syn):
     syn_locations = rng.uniform(0, 1, size=(n_neurons, pre_neurons, n_syn))
     return syn_locations
 
-def make_tuning_curves(network, Simulator, sim_seed, label, p_pre, p_bio_act, t_test):
-    min_rate = 10
-    max_rate = 100
-
-    with Simulator(network, seed=sim_seed) as sim:
-        sim.run(t_test)
-
-    encoders = None
-    for ens in network.ensembles:
-        if ens.label == label:
-            encoders = sim.data[ens].encoders
-            break
-    assert encoders is not None, "please set label='bio' on the test ensemble"
+def plot_tuning_curves(
+    encoders,
+    xhat_pre,
+    act_bio,
+    n_neurons=10,
+    figname='plots/tuning_curves.png',
+    n_eval_points=20):
 
     import matplotlib.pyplot as plt
     fig, ax = plt.subplots(1, 1)
 
-    n_eval_points = 20
-    xhat_pre = sim.data[p_pre]
-    act_bio = sim.data[p_bio_act]
-    for i in range(sim.data[p_bio_act].shape[1]):
+    for i in range(n_neurons):  # act_bio.shape[1]
         x_dot_e = np.dot(
             xhat_pre,
             np.sign(encoders[i]))
@@ -480,16 +504,16 @@ def make_tuning_curves(network, Simulator, sim_seed, label, p_pre, p_bio_act, t_
             if ts.shape[0] > 0: Hz_mean[xi] = np.average(act_bio[ts, i])
             if ts.shape[0] > 1: Hz_stddev[xi] = np.std(act_bio[ts, i])
 
-        bioplot = ax.plot(x_dot_e_vals[:-2], Hz_mean[:-2], label='%s' %i)
+        bioplot = ax.plot(x_dot_e_vals[:-2], Hz_mean[:-2])  # , label='%s' %i
         ax.fill_between(x_dot_e_vals[:-2],
             Hz_mean[:-2]+Hz_stddev[:-2],
             Hz_mean[:-2]-Hz_stddev[:-2],
             alpha=0.5)
 
-        if np.any(Hz_mean[:-2]+Hz_stddev[:-2] > max_rate):
-            warnings.warn('warning: neuron %s over max_rate' %i)
-        if np.all(Hz_mean[:-2]+Hz_stddev[:-2] < min_rate):
-            warnings.warn('warning: neuron %s under min_rate' %i)
+        # if np.any(Hz_mean[:-2]+Hz_stddev[:-2] > max_rate):
+        #     warnings.warn('warning: neuron %s over max_rate' %i)
+        # if np.all(Hz_mean[:-2]+Hz_stddev[:-2] < min_rate):
+        #     warnings.warn('warning: neuron %s under min_rate' %i)
 
     ax.legend()
-    fig.savefig('plots/tuning_curves.png')
+    fig.savefig(figname)

@@ -30,8 +30,8 @@ def test_tuning_curves(Simulator, plt):
 			dimensions=dim,
 			radius=radius,
 			# encoders=nengo.dists.Uniform(-1e0,1e0),
-			# gain=nengo.dists.Uniform(-2e2,2e2),
-			# bias=nengo.dists.Uniform(-2e0,2e0),
+			gain=nengo.dists.Uniform(-2e2,2e2),
+			bias=nengo.dists.Uniform(-3e-4,3e-4),
 			neuron_type=BahlNeuron(),
 			seed=ens_seed,
 			label='bio')

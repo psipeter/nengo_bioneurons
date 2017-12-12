@@ -2,7 +2,7 @@ import numpy as np
 import nengo
 from nengolib.signal import s
 from nengolib.synapses import Lowpass  #, DoubleExp
-from nengo_bioneurons import BahlNeuron, build_filter, evolve_h_d_out, make_tuning_curves
+from nengo_bioneurons import BahlNeuron, build_filter, evolve_h_d_out, plot_tuning_curves
 
 def test_fb_doubleexp(Simulator, plt):
 	pre_neurons = 100
@@ -21,8 +21,8 @@ def test_fb_doubleexp(Simulator, plt):
 	pass2_sig = 'cos'
 	pass2_freq = 1
 	pass2_seed = 2
-	pass3_sig = 'white_noise'
-	pass3_freq = 2
+	pass3_sig = 'cos'
+	pass3_freq = 1
 	pass3_seed = 3
 
 	network_seed = 1
@@ -35,7 +35,7 @@ def test_fb_doubleexp(Simulator, plt):
 	t_evo = 10.0  # 10.0
 	n_threads = 10
 	evo_popsize = 10
-	evo_gen = 7  # 4
+	evo_gen = 6  # 4
 	zeros_init = []
 	poles_init = [-1e2, -1e2]
 	zeros_delta = []
@@ -50,6 +50,8 @@ def test_fb_doubleexp(Simulator, plt):
 
 	inter_type = nengo.AdaptiveLIF(tau_n=0.1, inc_n=0.01)  #  BahlNeuron()  # 
 	bio_type = nengo.AdaptiveLIF(tau_n=0.1, inc_n=0.01)  #  BahlNeuron()  # 
+
+	syn_locs = np.random.RandomState(seed=ens_seed).uniform(0, 1, size=(bio_neurons, pre_neurons, n_syn))
 
 	def make_network(
 		d_bio_out,
@@ -71,7 +73,8 @@ def test_fb_doubleexp(Simulator, plt):
 		sig_freq,
 		sig_seed,
 		inter_type,
-		bio_type):
+		bio_type,
+		syn_locs=None):
 
 		with nengo.Network(seed=network_seed) as network:
 
@@ -115,7 +118,9 @@ def test_fb_doubleexp(Simulator, plt):
 				neuron_type=inter_type,
 				seed=ens_seed,
 				label='inter')
-			target = nengo.Node(size_in=dim)
+			target = nengo.Node(
+				size_in=dim,
+				label='target')
 
 			stim_pre = nengo.Connection(stim, pre,
 				synapse=None,
@@ -151,8 +156,7 @@ def test_fb_doubleexp(Simulator, plt):
 				n_syn=n_syn,
 				syn_type='Exp2Syn',
 				tau_list=[tau_rise_inter_bio, tau_fall_inter_bio],
-				# syn_locs=syn_locs,
-				# synapse=DoubleExp(tau_rise_inter_bio, tau_fall_inter_bio),  # for alif testing
+				syn_locs=syn_locs,
 				synapse=build_filter([], [-1.0/tau_rise_inter_bio, -1.0/tau_fall_inter_bio]),  # for alif testing
 				transform=T_inter_bio,		
 				solver=nengo.solvers.NoSolver(d_inter_bio),
@@ -162,8 +166,7 @@ def test_fb_doubleexp(Simulator, plt):
 				n_syn=n_syn,
 				syn_type='Exp2Syn',
 				tau_list=[tau_rise_bio_bio, tau_fall_bio_bio],
-				# syn_locs=syn_locs,
-				# synapse=DoubleExp(tau_rise_bio_bio, tau_fall_bio_bio),  # for alif testing
+				syn_locs=syn_locs,
 				synapse=build_filter([], [-1.0/tau_rise_bio_bio, -1.0/tau_fall_bio_bio]),  # for alif testing
 				transform=T_bio_bio,
 				solver=nengo.solvers.NoSolver(d_bio_bio),
@@ -177,24 +180,21 @@ def test_fb_doubleexp(Simulator, plt):
 			network.p_pre = nengo.Probe(pre, synapse=tau)
 			network.p_pre2 = nengo.Probe(pre2, synapse=tau)
 			network.p_bio_act = nengo.Probe(bio.neurons, 'spikes',
-				# synapse=DoubleExp(tau_rise_bio_out, tau_fall_bio_out))
 				synapse=build_filter([], [-1.0/tau_rise_bio_out, -1.0/tau_fall_bio_out]))
 			network.p_bio = nengo.Probe(bio,
-				# synapse=DoubleExp(tau_rise_bio_out, tau_fall_bio_out),
-				synapse=build_filter([], [-1.0/tau_rise_bio_bio, -1.0/tau_fall_bio_bio]),
+				synapse=build_filter([], [-1.0/tau_rise_bio_out, -1.0/tau_fall_bio_out]),
 				solver=nengo.solvers.NoSolver(d_bio_out))
 			network.p_lif_act = nengo.Probe(lif.neurons, 'spikes', synapse=tau)
 			network.p_lif = nengo.Probe(lif, synapse=tau)
 			network.p_inter_act = nengo.Probe(inter.neurons, 'spikes',
-				# synapse=DoubleExp(tau_rise_inter_bio, tau_fall_inter_bio))
 				synapse=build_filter([], [-1.0/tau_rise_inter_bio, -1.0/tau_fall_inter_bio]))
 			network.p_inter = nengo.Probe(inter,
-				# synapse=DoubleExp(tau_rise_inter_bio, tau_fall_inter_bio),
 				synapse=build_filter([], [-1.0/tau_rise_inter_bio, -1.0/tau_fall_inter_bio]),
 				solver=nengo.solvers.NoSolver(d_inter_bio))
 			network.p_target = nengo.Probe(target, synapse=tau)
 
 			network.inter_bio = inter_bio
+			network.bio_bio = bio_bio
 			network.p_bio_spikes = nengo.Probe(bio.neurons, 'spikes', synapse=None)
 			network.p_inter_spikes = nengo.Probe(inter.neurons, 'spikes', synapse=None)
 
@@ -242,8 +242,8 @@ def test_fb_doubleexp(Simulator, plt):
 			pass1_freq,
 			pass1_seed,
 			inter_type,
-			bio_type=nengo.LIF())  # don't need to simulate bioneurons to decode inter
-
+			bio_type=nengo.LIF(),  # don't need to simulate bioneurons to decode inter
+			syn_locs=syn_locs)
 		zeros_inter_evo, poles_inter_evo, d_inter_evo = evolve_h_d_out(
 			network,
 			Simulator,
@@ -297,17 +297,17 @@ def test_fb_doubleexp(Simulator, plt):
 		pass1_freq,
 		pass1_seed,
 		inter_type,
-		bio_type=nengo.LIF())
+		bio_type=nengo.LIF(),
+		syn_locs=syn_locs)
 
-	# test_rates(network,
-	# 	Simulator,
-	# 	sim_seed,
-	# 	'inter',
-	# 	network.p_pre2,
-	# 	network.p_inter_act,
-	# 	t_test=10.0)
+	# encoders = None
+	# for ens in network.ensembles:
+	# 	if ens.label == 'bio':
+	# 		encoders = sim.data[ens].encoders
+	# 		break
+	# plot_tuning_curves(encoders, x_inter, a_bio)
 
-	with Simulator(network, seed=sim_seed, dt=dt) as sim:
+	with Simulator(network, seed=sim_seed, dt=dt, optimize=False) as sim:
 		sim.run(t_train)
 	x_inter = sim.data[network.p_inter]
 	x_target = sim.data[network.p_target]
@@ -363,7 +363,8 @@ def test_fb_doubleexp(Simulator, plt):
 			pass2_freq,
 			pass2_seed,
 			inter_type,
-			bio_type)
+			bio_type,
+			syn_locs)
 
 		zeros_bio_evo, poles_bio_evo, d_bio_evo = evolve_h_d_out(
 			network,
@@ -418,17 +419,20 @@ def test_fb_doubleexp(Simulator, plt):
 		pass2_freq,
 		pass2_seed,
 		inter_type,
-		bio_type)
+		bio_type,
+		syn_locs)
 
-	with Simulator(network, seed=sim_seed, dt=dt) as sim:
+	with Simulator(network, seed=sim_seed, dt=dt, optimize=False) as sim:
 		sim.run(t_train)
 	x_bio = sim.data[network.p_bio]
+	x_inter = sim.data[network.p_inter]
 	x_target = sim.data[network.p_target]
 	e_bio = nengo.utils.numpy.rmse(x_bio, x_target)
 
 	import matplotlib.pyplot as plt
 	fig, ax = plt.subplots(1, 1)
 	ax.plot(sim.trange(), x_bio, label='bio, e=%.5f' %e_bio)
+	ax.plot(sim.trange(), x_inter, label='inter')
 	ax.plot(sim.trange(), x_target, label='target')
 	ax.legend()
 	fig.savefig('plots/fb_inter_bio')
@@ -468,35 +472,59 @@ def test_fb_doubleexp(Simulator, plt):
 		pass3_sig,
 		pass3_freq,
 		pass3_seed,
-		inter_type,
-		bio_type)
+		inter_type=inter_type,  # not used during testing
+		bio_type=bio_type,
+		syn_locs=syn_locs)
 
-	with Simulator(network, seed=sim_seed, dt=dt) as sim:
+	with Simulator(network, seed=sim_seed, dt=dt, optimize=False) as sim:
 		sim.run(t_test)
 	a_bio = sim.data[network.p_bio_act]
+	x_inter = sim.data[network.p_inter]
 	x_target = sim.data[network.p_target]
 	x_bio = sim.data[network.p_bio]
 	x_lif = sim.data[network.p_lif]
 	e_bio = nengo.utils.numpy.rmse(x_bio, x_target)
 	e_lif = nengo.utils.numpy.rmse(x_lif, x_target)
 
+	# encoders = None
+	# for ens in network.ensembles:
+	# 	if ens.label == 'bio':
+	# 		encoders = sim.data[ens].encoders
+	# 		break
+	# plot_tuning_curves(encoders, x_inter, a_bio)
+
 	import matplotlib.pyplot as plt
-	from nengo.utils.matplotlib import rasterplot
-	fig, (ax, ax2) = plt.subplots(1, 2, figsize=(8,16))
-	rasterplot(sim.trange(), sim.data[network.p_inter_spikes], ax=ax)
-	rasterplot(sim.trange(), sim.data[network.p_bio_spikes], ax=ax2)
-	ax.set(title='inter')
-	ax2.set(title='bio')
-	fig.savefig('plots/fb_bio_bio_spikes')
 	from seaborn import kdeplot
-	fig, ax = plt.subplots(1, 1)
-	kdeplot(d_inter_bio.squeeze(), label='inter_bio')
-	kdeplot(d_bio_bio.squeeze(), label='bio_bio')
-	ax.legend()
-	fig.savefig('plots/fb_bio_bio_decoders')
+	from nengo.utils.matplotlib import rasterplot
+
 	fig, ax = plt.subplots(1, 1)
 	ax.plot(sim.trange(), x_bio, label='bio, e=%.5f' %e_bio)
 	ax.plot(sim.trange(), x_lif, label='lif, e=%.5f' %e_lif)
 	ax.plot(sim.trange(), x_target, label='target')
 	ax.legend()
 	fig.savefig('plots/fb_bio_bio_estimates')
+
+	fig, ax = plt.subplots(1, 1)
+	kdeplot(d_inter_bio.squeeze(), label='inter_bio')
+	kdeplot(d_bio_bio.squeeze(), label='bio_bio')
+	ax.legend()
+	fig.savefig('plots/fb_bio_bio_decoders')
+
+	# note: full weight matrices for each of n_syn synapses, just look at 0th syn
+	fig, ax = plt.subplots(1, 1)
+	for syn in range(sim.data[network.inter_bio].weights.T.shape[0]):
+		w_inter_bio = sim.data[network.inter_bio].weights.T[syn]
+		w_bio_bio = sim.data[network.bio_bio].weights.T[syn]
+		if np.sum(w_inter_bio) != 0.0: kdeplot(w_inter_bio.ravel(), label='inter_bio %s' %syn)
+		if np.sum(w_bio_bio) != 0.0: kdeplot(w_bio_bio.ravel(), label='bio_bio %s' %syn)
+	ax.legend()
+	fig.savefig('plots/fb_bio_bio_weights')
+
+	fig, (ax, ax2) = plt.subplots(1, 2, figsize=(8,16))
+	rasterplot(sim.trange(), sim.data[network.p_inter_spikes], ax=ax)
+	rasterplot(sim.trange(), sim.data[network.p_bio_spikes], ax=ax2)
+	ax.set(title='inter')
+	ax2.set(title='bio')
+	fig.savefig('plots/fb_bio_bio_spikes')
+
+	assert False

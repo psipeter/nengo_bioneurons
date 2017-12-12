@@ -1,6 +1,6 @@
 import numpy as np
 import nengo
-from nengo_bioneurons import BahlNeuron, build_filter, evolve_h_d_out
+from nengo_bioneurons import BahlNeuron, build_filter, evolve_h_d_out, plot_tuning_curves
 
 def test_basic_ff(Simulator, plt):
 	pre_neurons = 100
@@ -55,10 +55,12 @@ def test_basic_ff(Simulator, plt):
 				dimensions=dim,
 				radius=radius,
 				# encoders=nengo.dists.Uniform(-1e0,1e0),
-				# gain=nengo.dists.Uniform(-2e2,2e2),
+				gain=nengo.dists.Uniform(-2e2,2e2),
 				# bias=nengo.dists.Uniform(-1e0,1e0),
+				bias=nengo.dists.Uniform(-1e-3, 1e-3),
 				neuron_type=BahlNeuron(),
-				seed=ens_seed)
+				seed=ens_seed,
+				label='bio')
 			lif = nengo.Ensemble(
 				n_neurons=bio_neurons,
 				dimensions=dim,
@@ -103,7 +105,8 @@ def test_basic_ff(Simulator, plt):
 		'sin',
 		sig_freq,
 		sig_seed)
-	with Simulator(network, seed=sim_seed, dt=dt) as sim:
+
+	with Simulator(network, seed=sim_seed, dt=dt, optimize=False) as sim:
 		sim.run(t_train)
 	a_bio = sim.data[network.p_bio_act]
 	x_target = sim.data[network.p_target]
@@ -135,7 +138,7 @@ def test_basic_ff(Simulator, plt):
 		'white_noise',
 		white_noise_freq,
 		sig_seed)
-	with Simulator(network, seed=sim_seed, dt=dt) as sim:
+	with Simulator(network, seed=sim_seed, dt=dt, optimize=False) as sim:
 		sim.run(t_test)
 	x_bio = sim.data[network.p_bio]
 	x_lif = sim.data[network.p_lif]
@@ -151,6 +154,15 @@ def test_basic_ff(Simulator, plt):
 	ax.legend()
 	fig.savefig('plots/basic_ff_test')
 
+	encoders = None
+	a_bio = sim.data[network.p_bio_act]
+	x_pre = sim.data[network.p_pre]
+	for ens in network.ensembles:
+		if ens.label == 'bio':
+			encoders = sim.data[ens].encoders
+			break
+	plot_tuning_curves(encoders, x_pre, a_bio, figname='plots/basic_ff_test.png', n_neurons=10)
+
 
 def test_evolved_ff(Simulator, plt):
 	pre_neurons = 100
@@ -160,8 +172,8 @@ def test_evolved_ff(Simulator, plt):
 	tau_rise = 0.02
 	radius = 1
 	n_syn = 5
-	t_train = 3.0
-	t_test = 3.0
+	t_train = 0.1
+	t_test = 0.1
 	dim = 1
 	sig_freq = 2 * np.pi
 	d_out = np.zeros((bio_neurons, dim))
@@ -173,10 +185,10 @@ def test_evolved_ff(Simulator, plt):
 	sig_seed = 5
 	evo_seed = 6
 
-	t_evo = 3.0
+	t_evo = 0.1
 	n_threads = 10
 	evo_popsize = 10
-	evo_gen = 10
+	evo_gen = 2
 	zeros_init = []
 	poles_init = [-1e2, -1e2]
 	zeros_delta = []
@@ -258,36 +270,41 @@ def test_evolved_ff(Simulator, plt):
 		return network
 
 	''' TRAIN '''
-	h_out = nengo.Lowpass(tau)
-	network = make_network(
-		d_out,
-		h_out,
-		network_seed,
-		sim_seed,
-		ens_seed,
-		conn_seed,
-		'sin',
-		sig_freq,
-		sig_seed)
-	zeros_evo, poles_evo, d_bio_evo = evolve_h_d_out(
-		network,
-		Simulator,
-		sim_seed,
-		t_evo,
-		dt,
-		tau,
-		n_threads,
-		evo_popsize,
-		evo_gen,
-		evo_seed,
-		zeros_init,
-		poles_init,
-		zeros_delta,
-		poles_delta,
-		network.p_bio_act,
-		network.p_target,
-		training_dir,
-		training_file)
+	try:
+		zeros_evo = np.load(training_dir+training_file+'.npz')['zeros']
+		poles_evo = np.load(training_dir+training_file+'.npz')['poles']
+		d_bio_evo = np.load(training_dir+training_file+'.npz')['decoders']
+	except IOError:
+		h_out = nengo.Lowpass(tau)
+		network = make_network(
+			d_out,
+			h_out,
+			network_seed,
+			sim_seed,
+			ens_seed,
+			conn_seed,
+			'sin',
+			sig_freq,
+			sig_seed)
+		zeros_evo, poles_evo, d_bio_evo = evolve_h_d_out(
+			network,
+			Simulator,
+			sim_seed,
+			t_evo,
+			dt,
+			tau,
+			n_threads,
+			evo_popsize,
+			evo_gen,
+			evo_seed,
+			zeros_init,
+			poles_init,
+			zeros_delta,
+			poles_delta,
+			network.p_bio_act,
+			network.p_target,
+			training_dir,
+			training_file)
 
 	h_out_new = build_filter(zeros_evo, poles_evo)
 	d_out_new = d_bio_evo
@@ -329,8 +346,10 @@ def test_evolved_ff(Simulator, plt):
 		'sin',
 		sig_freq,
 		sig_seed)
+
 	with Simulator(network, seed=sim_seed, dt=dt) as sim:
 		sim.run(t_test)
+
 	x_bio = sim.data[network.p_bio]
 	x_lif = sim.data[network.p_lif]
 	x_target = sim.data[network.p_target]
