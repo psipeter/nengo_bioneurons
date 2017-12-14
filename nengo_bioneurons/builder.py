@@ -113,7 +113,7 @@ class Exp2Syn(object):
         self.spike_in.weight[0] = abs(self.weight)
 
     def update_weight(self, w_new):
-        self.weight = w_new
+        self.weight += w_new
         if self.weight >= 0.0:
             self.syn.e = self.e_exc
         else:
@@ -163,10 +163,11 @@ class TransmitSpikes(Operator):
     into a bioensemble.
     """
 
-    def __init__(self, ens_pre, ens_post, neurons, spikes, states):
+    def __init__(self, ens_pre, ens_post, learning_node, neurons, spikes, states):
         super(TransmitSpikes, self).__init__()
         self.ens_pre = ens_pre
         self.ens_post = ens_post
+        self.learning_node = learning_node
         self.neurons = neurons
         self.time = states[0]
         self.reads = [spikes, states[0]]
@@ -183,15 +184,28 @@ class TransmitSpikes(Operator):
         time = signals[self.time]
 
         def step():
+            # update synaptic weights from ens_pre to self if learning rule is on
+            # todo: put weight update somewhere more sensible, this greatly increases runtime
+            # for nrn in self.neurons:
+            #     for n in range(spikes.shape[0]):
+            #         for j, syn in enumerate(nrn.synapses[self.ens_pre][n]):
+            #             syn.update_weight(nrn.syn_weights[self.ens_pre][n, j])
+            # transmit spikes at times t_neuron
+            if self.learning_node is not None:
+                delta_weights = self.learning_node.delta_weights
             t_neuron = (time.item()-dt)*1000
             for n in range(spikes.shape[0]):
                 num_spikes = int(spikes[n]*dt + 1e-9)
                 for _ in range(num_spikes):
-                    for nrn in self.neurons:
+                    for b, nrn in enumerate(self.neurons):
                         for j, syn in enumerate(nrn.synapses[self.ens_pre][n]):
-                            # update synaptic weight if learning rule is on
-                            syn.update_weight(nrn.syn_weights[self.ens_pre][n, j])
                             syn.spike_in.event(t_neuron)
+                            if self.learning_node is not None:
+                                # only updates when a spike is sent into this synapse
+                                syn.update_weight(delta_weights[b, n, j])
+                                # bookkeeping for nengo connection weights
+                                self.learning_node.conn.syn_weights[b, n, j] += delta_weights[b, n, j]
+
         return step
 
 def deref_objview(o):
@@ -325,11 +339,10 @@ def build_bias(model, bioensemble, biases, method='decode'):
                 w_ij = syn_weights[j, pre, syn]
                 synapse = ExpSyn(section, w_ij, tau, loc[pre, syn])
                 bahl.synapses[lif][pre][syn] = synapse
-        bahl.syn_weights[lif] = syn_weights[j]  # for updating weights real-time
     neuron.init()
 
     model.add_op(TransmitSpikes(
-        lif, bioensemble, neurons,
+        lif, bioensemble, None, neurons,
         model.sig[lif]['out'], states=[model.time]))
     # todo: update model.params
     # model.params['bias'] = BuiltConnection(eval_points=eval_points,
@@ -370,14 +383,17 @@ def build_connection(model, conn):
         """
         Given a parcicular connection, labeled by conn.pre,
         Grab the initial decoders
-        Generate locations for synapses,
-        Create synapses with weight equal to
-        w_ij=np.dot(d_i,alpha_j*e_j)/n_syn, where
-            - d_i is the initial decoder,
-            - e_j is the single bioneuron encoder
-            - alpha_j is the single bioneuron gain
-            - n_syn normalizes total input current for multiple-synapse conns
-        Add synapses to bioneuron.synapses
+        Generate locations for synapses, then either
+        (a) Create synapses with weight equal to
+            w_ij=np.dot(d_i,alpha_j*e_j)/n_syn, where
+                - d_i is the initial decoder,
+                - e_j is the single bioneuron encoder
+                - alpha_j is the single bioneuron gain
+                - n_syn normalizes total input current for multiple-synapse conns
+        (b) Load synaptic weights from a prespecified matrix
+
+        Add synapses with those weights to bioneuron.synapses,
+        store this initial synaptic weight matrix in conn.weights = conn.syn_weights
         Finally call neuron.init().
         """
         if conn.syn_locs is None:
@@ -388,7 +404,7 @@ def build_connection(model, conn):
                 conn.n_syn)
         syn_flag = False
         if conn.syn_weights is None:
-            syn_flag = True  
+            syn_flag = True
             conn.syn_weights = np.zeros((
                 conn_post.n_neurons,
                 conn_pre.n_neurons,
@@ -425,7 +441,7 @@ def build_connection(model, conn):
                         w_ij = np.dot(decoders.T[pre], gain * encoder)
                         w_ij = w_ij / conn.n_syn / k_norm
                         conn.syn_weights[j, pre, syn] = w_ij
-                    else:  # syn_weights already specified (precalculated or learning rule)
+                    else:  # syn_weights already specified
                         w_ij = conn.syn_weights[j, pre, syn]
                     if conn.syn_type == 'ExpSyn':
                         tau = conn.tau_list[0]
@@ -436,11 +452,10 @@ def build_connection(model, conn):
                         tau2 = conn.tau_list[1]
                         synapse = Exp2Syn(section, w_ij, tau1, tau2, loc[pre, syn])
                     bahl.synapses[conn_pre][pre][syn] = synapse
-            bahl.syn_weights[conn_pre] = conn.syn_weights[j]  # for updating weights real-time
         neuron.init()
 
         model.add_op(TransmitSpikes(
-            conn_pre, conn_post, neurons,
+            conn_pre, conn_post, conn.learning_node, neurons,
             model.sig[conn_pre]['out'], states=[model.time]))
         model.params[conn] = BuiltConnection(eval_points=eval_points,
                                              solver_info=solver_info,

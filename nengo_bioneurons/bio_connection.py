@@ -19,6 +19,7 @@ class BioConnection(NengoConnection):
         tau_list=[0.01],
         syn_locs=None,
         syn_weights=None,
+        learning_node=None,
         **kwargs):
         """
         sec: the section(s) of the NEURON model on which to distribute synapses
@@ -34,5 +35,6 @@ class BioConnection(NengoConnection):
         self.tau_list = tau_list
         self.syn_locs = syn_locs
         self.syn_weights = syn_weights
+        self.learning_node = learning_node
 
         super(BioConnection, self).__init__(pre, post, **kwargs)
