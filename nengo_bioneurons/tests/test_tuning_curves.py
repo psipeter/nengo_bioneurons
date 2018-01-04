@@ -1,14 +1,15 @@
 import numpy as np
 import nengo
-from nengo_bioneurons import BahlNeuron, make_tuning_curves
+from nengo_bioneurons import BahlNeuron, plot_tuning_curves
 
-def test_tuning_curves(Simulator, plt):
+def test_basic_tuning_curves(Simulator, plt):
 	pre_neurons = 100
 	bio_neurons = 10
 	tau = 0.01
 	radius = 1
 	n_syn = 1
 	t_test = 10.0
+	dt = 0.001
 	dim = 1
 	freq = 0.5 * np.pi
 	d_out = np.zeros((bio_neurons, dim))
@@ -61,14 +62,13 @@ def test_tuning_curves(Simulator, plt):
 		network.p_lif_act = nengo.Probe(lif.neurons, 'spikes', synapse=nengo.Lowpass(tau))
 		network.p_lif = nengo.Probe(lif, synapse=tau)
 
-	make_tuning_curves(
-		network,
-		Simulator,
-		sim_seed,
-		'bio',
-		network.p_pre,
-		network.p_bio_act,
-		t_test)
+	with Simulator(network, seed=sim_seed, dt=dt, optimize=False) as sim:
+		sim.run(t_test)
+	a_bio = sim.data[network.p_bio_act]
+	x_pre = sim.data[network.p_pre]
+	encoders = sim.data[bio].encoders
+
+	plot_tuning_curves(encoders, x_pre, a_bio, figname='plots/basic_tuning_curves.png', n_neurons=10)
 
 
 def test_multi_synapse_section(Simulator, plt):
@@ -80,6 +80,7 @@ def test_multi_synapse_section(Simulator, plt):
 	n_syn2 = 5
 	n_syn3 = 7
 	t_test = 10.0
+	dt = 0.001
 	dim = 1
 	freq = 0.5 * np.pi
 	d_out = np.zeros((bio_neurons, dim))
@@ -139,11 +140,10 @@ def test_multi_synapse_section(Simulator, plt):
 		network.p_lif_act = nengo.Probe(lif.neurons, 'spikes', synapse=nengo.Lowpass(tau))
 		network.p_lif = nengo.Probe(lif, synapse=tau)
 
-	make_tuning_curves(
-		network,
-		Simulator,
-		sim_seed,
-		'bio',
-		network.p_pre,
-		network.p_bio_act,
-		t_test)
+	with Simulator(network, seed=sim_seed, dt=dt, optimize=False) as sim:
+		sim.run(t_test)
+	a_bio = sim.data[network.p_bio_act]
+	x_pre = sim.data[network.p_pre]
+	encoders = sim.data[bio].encoders
+
+	plot_tuning_curves(encoders, x_pre, a_bio, figname='plots/synaptic_tuning_curves.png', n_neurons=10)

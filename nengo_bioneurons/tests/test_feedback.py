@@ -21,9 +21,9 @@ def test_fb_doubleexp(Simulator, plt):
 	pass2_sig = 'cos'
 	pass2_freq = 1
 	pass2_seed = 2
-	pass3_sig = 'cos'
+	pass3_sig = 'white_noise'
 	pass3_freq = 1
-	pass3_seed = 3
+	pass3_seed = 5
 
 	network_seed = 1
 	sim_seed = 2
@@ -35,18 +35,15 @@ def test_fb_doubleexp(Simulator, plt):
 	t_evo = 10.0  # 10.0
 	n_threads = 10
 	evo_popsize = 10
-	evo_gen = 6  # 4
+	evo_gen = 5  # 4
 	zeros_init = []
 	poles_init = [-1e2, -1e2]
 	zeros_delta = []
 	poles_delta = [1e1, 1e1]
+
 	training_dir = '/home/pduggins/nengo_bioneurons/nengo_bioneurons/tests/filters/'
-	training_file_inter = 'test_fb_inter' + \
-		'_%s_bioneurons_%s_t_evo_%s_evo_popsize_%s_evo_gen'\
-		%(bio_neurons, t_evo, evo_popsize, evo_gen)
-	training_file_bio = 'test_fb_bio' + \
-		'_%s_bioneurons_%s_t_evo_%s_evo_popsize_%s_evo_gen'\
-		%(bio_neurons, t_evo, evo_popsize, evo_gen)
+	training_file_inter = 'inter_alif_straight'
+	training_file_bio = 'bio_alif_straight'
 
 	inter_type = nengo.AdaptiveLIF(tau_n=0.1, inc_n=0.01)  #  BahlNeuron()  # 
 	bio_type = nengo.AdaptiveLIF(tau_n=0.1, inc_n=0.01)  #  BahlNeuron()  # 
@@ -387,15 +384,21 @@ def test_fb_doubleexp(Simulator, plt):
 			training_file_bio)
 
 	# Test the accuracy of the ideally-stimulated bioneurons
-	d_bio_out = d_bio_evo
+	d_bio_out = d_inter_evo
+	# d_bio_out = d_bio_evo
 	d_inter_bio = d_inter_evo
-	d_bio_bio = d_bio_evo
-	tau_rise_bio_out = -1.0 / poles_bio_evo[0]
-	tau_fall_bio_out = -1.0 / poles_bio_evo[1]
+	d_bio_bio = np.zeros((bio_neurons, dim))
+	# d_bio_bio = d_bio_evo
+	tau_rise_bio_out = -1.0 / poles_inter_evo[0]
+	tau_fall_bio_out = -1.0 / poles_inter_evo[1]
+	# tau_rise_bio_out = -1.0 / poles_bio_evo[0]
+	# tau_fall_bio_out = -1.0 / poles_bio_evo[1]
 	tau_rise_inter_bio = -1.0 / poles_inter_evo[0]
 	tau_fall_inter_bio = -1.0 / poles_inter_evo[1]
 	tau_rise_bio_bio = -1.0 / poles_bio_evo[0]
 	tau_fall_bio_bio = -1.0 / poles_bio_evo[1]
+	# tau_rise_bio_bio = -1.0 / poles_bio_evo[0]
+	# tau_fall_bio_bio = -1.0 / poles_bio_evo[1]
 	T_inter_bio = 1.0
 	T_bio_bio = 0.0
 
@@ -435,7 +438,15 @@ def test_fb_doubleexp(Simulator, plt):
 	ax.plot(sim.trange(), x_inter, label='inter')
 	ax.plot(sim.trange(), x_target, label='target')
 	ax.legend()
-	fig.savefig('plots/fb_inter_bio')
+	fig.savefig('plots/fb_inter_bio_estimate')
+
+	from nengo.utils.matplotlib import rasterplot
+	fig, (ax, ax2) = plt.subplots(1, 2, figsize=(6,8))
+	rasterplot(sim.trange(), sim.data[network.p_inter_spikes], ax=ax)
+	rasterplot(sim.trange(), sim.data[network.p_bio_spikes], ax=ax2)
+	ax.set(title='inter')
+	ax2.set(title='bio')
+	fig.savefig('plots/fb_inter_bio_spikes')
 
 	'''
 	pass #3: test the accuracy of bio when these decoders/filters
@@ -507,18 +518,19 @@ def test_fb_doubleexp(Simulator, plt):
 	fig, ax = plt.subplots(1, 1)
 	kdeplot(d_inter_bio.squeeze(), label='inter_bio')
 	kdeplot(d_bio_bio.squeeze(), label='bio_bio')
+	kdeplot(d_bio_out.squeeze(), label='bio_out')
 	ax.legend()
 	fig.savefig('plots/fb_bio_bio_decoders')
 
 	# note: full weight matrices for each of n_syn synapses, just look at 0th syn
-	fig, ax = plt.subplots(1, 1)
-	for syn in range(sim.data[network.inter_bio].weights.T.shape[0]):
-		w_inter_bio = sim.data[network.inter_bio].weights.T[syn]
-		w_bio_bio = sim.data[network.bio_bio].weights.T[syn]
-		if np.sum(w_inter_bio) != 0.0: kdeplot(w_inter_bio.ravel(), label='inter_bio %s' %syn)
-		if np.sum(w_bio_bio) != 0.0: kdeplot(w_bio_bio.ravel(), label='bio_bio %s' %syn)
-	ax.legend()
-	fig.savefig('plots/fb_bio_bio_weights')
+	# fig, ax = plt.subplots(1, 1)
+	# for syn in range(sim.data[network.inter_bio].weights.T.shape[0]):
+	# 	w_inter_bio = sim.data[network.inter_bio].weights.T[syn]
+	# 	w_bio_bio = sim.data[network.bio_bio].weights.T[syn]
+	# 	if np.sum(w_inter_bio) != 0.0: kdeplot(w_inter_bio.ravel(), label='inter_bio %s' %syn)
+	# 	if np.sum(w_bio_bio) != 0.0: kdeplot(w_bio_bio.ravel(), label='bio_bio %s' %syn)
+	# ax.legend()
+	# fig.savefig('plots/fb_bio_bio_weights')
 
 	fig, (ax, ax2) = plt.subplots(1, 2, figsize=(8,16))
 	rasterplot(sim.trange(), sim.data[network.p_inter_spikes], ax=ax)
@@ -526,5 +538,3 @@ def test_fb_doubleexp(Simulator, plt):
 	ax.set(title='inter')
 	ax2.set(title='bio')
 	fig.savefig('plots/fb_bio_bio_spikes')
-
-	assert False

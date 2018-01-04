@@ -53,7 +53,7 @@ def evolve_h_d_out(
 		run the simulation, collect filtered activites,
 		and apply the oracle method to calculate readout decoders
 		"""
-		with Simulator(network, dt=dt, progress_bar=False, seed=sim_seed) as sim:
+		with Simulator(network, dt=dt, progress_bar=False, seed=sim_seed, optimize=False) as sim:
 			sim.run(t_evo)
 		a_bio = sim.data[p_bio_act]
 		x_target = sim.data[p_target]
@@ -83,7 +83,7 @@ def evolve_h_d_out(
 		run the simulation, collect filtered activites,
 		and apply the oracle method to calculate readout decoders
 		"""
-		with Simulator(network, dt=dt, progress_bar=False, seed=sim_seed) as sim:
+		with Simulator(network, dt=dt, progress_bar=False, seed=sim_seed, optimize=False) as sim:
 			sim.run(t_evo)
 		a_bio = sim.data[p_bio_act]
 		x_target = sim.data[p_target]

@@ -14,8 +14,9 @@ def test_fb_gradual(Simulator):
 	tau = 0.05
 	radius = 1
 	n_syn = 1
-	t_train = 5.0  # 10
-	t_test = 5.0  # 10
+	t_evo = 10.0  # 10.0
+	t_train = 10.0  # 10
+	t_test = 10.0  # 10
 	dim = 1
 
 	pass1_sig = 'cos'
@@ -24,9 +25,9 @@ def test_fb_gradual(Simulator):
 	pass2_sig = 'cos'
 	pass2_freq = 1
 	pass2_seed = 2
-	pass3_sig = 'cos'
+	pass3_sig = 'white_noise'
 	pass3_freq = 1
-	pass3_seed = 3
+	pass3_seed = 5
 
 	network_seed = 1
 	sim_seed = 2
@@ -35,7 +36,6 @@ def test_fb_gradual(Simulator):
 	sig_seed = 5
 	evo_seed = 6
 
-	t_evo = 10.0  # 10.0
 	n_threads = 10
 	evo_popsize = 10
 	evo_gen = 5  # 4
@@ -44,15 +44,15 @@ def test_fb_gradual(Simulator):
 	zeros_delta = []
 	poles_delta = [1e1, 1e1]
 
-	T_inter_bios = [1.0, 0.5, 0.0]
+	T_inter_bios = [1.0]
 	T_bio_bios = np.ones(len(T_inter_bios)) - T_inter_bios
 
 	H_dir = '/home/pduggins/nengo_bioneurons/nengo_bioneurons/tests/filters/'
-	H_inter = 'inter_bahl_2'  #  'inter_alif_3'  #
-	H_bio = 'bio_bahl_14'  #  'bio_alif_7'  #  
+	H_inter = 'inter_alif_tuft_4'  # 'inter_bahl_2'  #  'inter_alif_3'  #
+	H_bio = 'bio_alif_tuft_4'  # 'bio_bahl_14'  #  'bio_alif_7'  #  
 
-	inter_type = BahlNeuron()  #  nengo.AdaptiveLIF(tau_n=0.1, inc_n=0.01)  #  
-	bio_type = BahlNeuron()  #  nengo.AdaptiveLIF(tau_n=0.1, inc_n=0.01)  #  
+	inter_type = nengo.AdaptiveLIF(tau_n=0.1, inc_n=0.01)  #  BahlNeuron()  #    
+	bio_type = nengo.AdaptiveLIF(tau_n=0.1, inc_n=0.01)  #  BahlNeuron()  #    
 
 	syn_locs = np.random.RandomState(seed=ens_seed).uniform(0, 1, size=(bio_neurons, bio_neurons, n_syn))
 
@@ -102,8 +102,8 @@ def test_fb_gradual(Simulator):
 				dimensions=dim,
 				radius=radius,
 				neuron_type=bio_type,
-				gain=nengo.dists.Uniform(-1e2, 1e2),  # default
-				bias=nengo.dists.Uniform(-1e1, 1e1),  # 3x default
+				# gain=nengo.dists.Uniform(-1e2, 1e2),  # default
+				# bias=nengo.dists.Uniform(-1e1, 1e1),  # 3x default
 				seed=ens_seed,
 				label='bio')
 			lif = nengo.Ensemble(
@@ -271,67 +271,67 @@ def test_fb_gradual(Simulator):
 			H_inter)
 
 	# Test the accuracy of the inter decode
-	d_bio_out = np.zeros((bio_neurons, dim))
-	d_inter_bio = d_inter_evo
-	d_bio_bio = np.zeros((bio_neurons, dim))
-	tau_rise_bio_out = tau
-	tau_fall_bio_out = tau
-	tau_rise_inter_bio = -1.0 / poles_inter_evo[0]
-	tau_fall_inter_bio = -1.0 / poles_inter_evo[1]
-	tau_rise_bio_bio = tau
-	tau_fall_bio_bio = tau
-	T_inter_bio = 0.0
-	T_bio_bio = 0.0
+	# d_bio_out = np.zeros((bio_neurons, dim))
+	# d_inter_bio = d_inter_evo
+	# d_bio_bio = np.zeros((bio_neurons, dim))
+	# tau_rise_bio_out = tau
+	# tau_fall_bio_out = tau
+	# tau_rise_inter_bio = -1.0 / poles_inter_evo[0]
+	# tau_fall_inter_bio = -1.0 / poles_inter_evo[1]
+	# tau_rise_bio_bio = tau
+	# tau_fall_bio_bio = tau
+	# T_inter_bio = 0.0
+	# T_bio_bio = 0.0
 
-	network = make_network(
-		d_bio_out,
-		d_inter_bio,
-		d_bio_bio,
-		tau_rise_bio_out,
-		tau_fall_bio_out,
-		tau_rise_inter_bio,
-		tau_fall_inter_bio,
-		tau_rise_bio_bio,
-		tau_fall_bio_bio,
-		T_inter_bio,
-		T_bio_bio,
-		network_seed,
-		sim_seed,
-		ens_seed,
-		conn_seed,
-		pass1_sig,
-		pass1_freq,
-		pass1_seed,
-		inter_type,
-		bio_type,
-		syn_locs=syn_locs)
+	# network = make_network(
+	# 	d_bio_out,
+	# 	d_inter_bio,
+	# 	d_bio_bio,
+	# 	tau_rise_bio_out,
+	# 	tau_fall_bio_out,
+	# 	tau_rise_inter_bio,
+	# 	tau_fall_inter_bio,
+	# 	tau_rise_bio_bio,
+	# 	tau_fall_bio_bio,
+	# 	T_inter_bio,
+	# 	T_bio_bio,
+	# 	network_seed,
+	# 	sim_seed,
+	# 	ens_seed,
+	# 	conn_seed,
+	# 	pass1_sig,
+	# 	pass1_freq,
+	# 	pass1_seed,
+	# 	inter_type,
+	# 	bio_type,
+	# 	syn_locs=syn_locs)
 
-	with Simulator(network, seed=sim_seed, dt=dt) as sim:
-		sim.run(t_train)
-	x_inter = sim.data[network.p_inter]
-	x_target = sim.data[network.p_target]
-	e_inter = nengo.utils.numpy.rmse(x_inter, x_target)
+	# with Simulator(network, seed=sim_seed, dt=dt) as sim:
+	# 	sim.run(t_train)
+	# x_inter = sim.data[network.p_inter]
+	# x_target = sim.data[network.p_target]
+	# e_inter = nengo.utils.numpy.rmse(x_inter, x_target)
 
-	encoders = None
-	a_inter = sim.data[network.p_inter_act]
-	x_pre2 = sim.data[network.p_pre2]
-	for ens in network.ensembles:
-		if ens.label == 'bio':
-			encoders = sim.data[ens].encoders
-			break
-	plot_tuning_curves(encoders, x_pre2, a_inter, n_neurons=20)
+	# # encoders = None
+	# # a_inter = sim.data[network.p_inter_act]
+	# # x_pre2 = sim.data[network.p_pre2]
+	# # for ens in network.ensembles:
+	# # 	if ens.label == 'bio':
+	# # 		encoders = sim.data[ens].encoders
+	# # 		break
+	# # plot_tuning_curves(encoders, x_pre2, a_inter, n_neurons=20)
 
-	# fig, ax = plt.subplots(1, 1, figsize=(8,8))
-	# rasterplot(sim.trange(), sim.data[network.p_inter_spikes], ax=ax)
-	# # rasterplot(sim.trange(), sim.data[network.p_bio_spikes], ax=ax2)
-	# ax.set(title='inter')
-	# fig.savefig('plots/ff_inter_spikes')
+	# # fig, ax = plt.subplots(1, 1, figsize=(8,8))
+	# # rasterplot(sim.trange(), sim.data[network.p_inter_spikes], ax=ax)
+	# # # rasterplot(sim.trange(), sim.data[network.p_bio_spikes], ax=ax2)
+	# # ax.set(title='inter')
+	# # fig.savefig('plots/ff_inter_spikes')
 
-	fig, ax = plt.subplots(1, 1)
-	ax.plot(sim.trange(), x_inter, label='inter, e=%.5f' %e_inter)
-	ax.plot(sim.trange(), x_target, label='target')
-	ax.legend()
-	fig.savefig('plots/ff_inter_estimate')
+	# fig, ax = plt.subplots(1, 1)
+	# ax.plot(sim.trange(), x_inter, label='inter, e=%.5f' %e_inter)
+	# ax.plot(sim.trange(), x_target, label='target')
+	# ax.legend()
+	# fig.savefig('plots/ff_inter_estimate')
 
 	'''
 	pass #2.n: compute d_bio_out/d_bio_bio using bio's activities and filtered target
@@ -404,9 +404,12 @@ def test_fb_gradual(Simulator):
 			s_inter = sim.data[network.p_inter_spikes]
 			a_inter = sim.data[network.p_inter_act]
 			x_target = sim.data[network.p_target]
+			x_inter = sim.data[network.p_inter]
+			x_bio = sim.data[network.p_bio]
 			d_bio_outs.append(nengo.solvers.LstsqL2()(a_bio, x_target)[0])
-			d_bio_bios.append(d_bio_outs[-1])
-			x_bios.append(np.dot(a_bio, d_bio_outs[-1]))
+			d_bio_bios.append(nengo.solvers.LstsqL2()(a_bio, x_target)[0])
+			x_bios.append(x_bio)
+			# x_bios.append(np.dot(a_bio, d_bio_outs[-1]))
 			e_bios.append(nengo.utils.numpy.rmse(x_target, x_bios[-1]))
 			s_bios.append(s_bio)
 			a_bios.append(a_bio)
@@ -433,24 +436,26 @@ def test_fb_gradual(Simulator):
 		ax.plot(times, x_bios[n], label='bio T_bio_bio=%.3f, e=%.3f'
 			%(T_bio_bios[n], e_bios[n]))
 	ax.plot(times, x_target, label='target')
+	# ax.plot(times, x_inter, label='inter')
 	ax.legend()
 	fig.savefig('plots/fb_gradual_transition_estimates')
 
 	# Plot the spikes the course of the transition
-	fig, axs = plt.subplots(1, len(x_bios), figsize=(3*len(x_bios),8), sharex=True, sharey=True)
+	fig, axs = plt.subplots(1, len(x_bios)+1, figsize=(3*(len(x_bios)+1),8), sharex=True, sharey=True)
 	for n in range(len(x_bios)):
-		# rasterplot(times, s_inters[n], ax=ax)
-		rasterplot(times, s_bios[n], ax=axs[n])
-		axs[n].set(title='T_bio_bio=%0.3f' %T_bio_bios[n])
+		rasterplot(times, s_inters[n], ax=axs[0])
+		rasterplot(times, s_bios[n], ax=axs[n+1])
+		axs[0].set(title='inter')
+		axs[n+1].set(title='T_bio_bio=%0.3f' %T_bio_bios[n])
 	fig.savefig('plots/fb_gradual_transition_spikes')
 
 	# Plot the total activity (inter + bio) going into bio as a function of time
-	fig, axs = plt.subplots(1, len(x_bios), figsize=(3*len(x_bios),8), sharex=True, sharey=True)
-	for n in range(len(x_bios)):
-		axs[n].plot(times, np.sum(a_bios[n], axis=1) + np.sum(a_inters[n], axis=1))
-		axs[n].set(title='T_bio_bio=%0.3f' %T_bio_bios[n])
-	axs[0].set(ylabel='summed input activities (unweighted)')
-	fig.savefig('plots/fb_gradual_transition_input_currents_unweighted')
+	# fig, axs = plt.subplots(1, len(x_bios), figsize=(3*len(x_bios),8), sharex=True, sharey=True)
+	# for n in range(len(x_bios)):
+	# 	axs[n].plot(times, np.sum(a_bios[n], axis=1) + np.sum(a_inters[n], axis=1))
+	# 	axs[n].set(title='T_bio_bio=%0.3f' %T_bio_bios[n])
+	# axs[0].set(ylabel='summed input activities (unweighted)')
+	# fig.savefig('plots/fb_gradual_transition_input_currents_unweighted')
 
 
 	# Plot the total activity (inter + bio) going into bio as a function of time,
@@ -460,50 +465,50 @@ def test_fb_gradual(Simulator):
 	pass #3: test the accuracy of bio when these decoders/filters
 	are used for the recurrent connection
 	'''
-	# d_bio_out = d_bio_outs[1]
-	# d_inter_bio = d_inter_evo
-	# d_bio_bio = d_bio_bios[0]
-	# tau_rise_bio_out = -1.0 / poles_inter_evo[0]
-	# tau_fall_bio_out = -1.0 / poles_inter_evo[1]
-	# tau_rise_inter_bio = -1.0 / poles_inter_evo[0]
-	# tau_fall_inter_bio = -1.0 / poles_inter_evo[1]
-	# tau_rise_bio_bio = -1.0 / poles_inter_evo[0]
-	# tau_fall_bio_bio = -1.0 / poles_inter_evo[1]
-	# T_inter_bio = 0.0
-	# T_bio_bio = 1.0
+	d_bio_out = d_bio_outs[-1]
+	d_inter_bio = d_inter_evo
+	d_bio_bio = d_bio_bios[-1]
+	tau_rise_bio_out = -1.0 / poles_inter_evo[0]
+	tau_fall_bio_out = -1.0 / poles_inter_evo[1]
+	tau_rise_inter_bio = -1.0 / poles_inter_evo[0]
+	tau_fall_inter_bio = -1.0 / poles_inter_evo[1]
+	tau_rise_bio_bio = -1.0 / poles_inter_evo[0]
+	tau_fall_bio_bio = -1.0 / poles_inter_evo[1]
+	T_inter_bio = 0.0
+	T_bio_bio = 1.0
 
-	# network = make_network(
-	# 	d_bio_out,
-	# 	d_inter_bio,
-	# 	d_bio_bio,
-	# 	tau_rise_bio_out,
-	# 	tau_fall_bio_out,
-	# 	tau_rise_inter_bio,
-	# 	tau_fall_inter_bio,
-	# 	tau_rise_bio_bio,
-	# 	tau_fall_bio_bio,
-	# 	T_inter_bio,
-	# 	T_bio_bio,
-	# 	network_seed,
-	# 	sim_seed,
-	# 	ens_seed,
-	# 	conn_seed,
-	# 	pass3_sig,
-	# 	pass3_freq,
-	# 	pass3_seed,
-	# 	inter_type,  # not used during testing
-	# 	bio_type,
-	# 	syn_locs)
+	network = make_network(
+		d_bio_out,
+		d_inter_bio,
+		d_bio_bio,
+		tau_rise_bio_out,
+		tau_fall_bio_out,
+		tau_rise_inter_bio,
+		tau_fall_inter_bio,
+		tau_rise_bio_bio,
+		tau_fall_bio_bio,
+		T_inter_bio,
+		T_bio_bio,
+		network_seed,
+		sim_seed,
+		ens_seed,
+		conn_seed,
+		pass3_sig,
+		pass3_freq,
+		pass3_seed,
+		inter_type,  # not used during testing
+		bio_type,
+		syn_locs)
 
-	# with Simulator(network, seed=sim_seed, dt=dt) as sim:
-	# 	sim.run(t_test)
-	# a_bio = sim.data[network.p_bio_act]
-	# x_inter = sim.data[network.p_inter]
-	# x_target = sim.data[network.p_target]
-	# x_bio = sim.data[network.p_bio]
-	# x_lif = sim.data[network.p_lif]
-	# e_bio = nengo.utils.numpy.rmse(x_bio, x_target)
-	# e_lif = nengo.utils.numpy.rmse(x_lif, x_target)
+	with Simulator(network, seed=sim_seed, dt=dt) as sim:
+		sim.run(t_test)
+	a_bio = sim.data[network.p_bio_act]
+	x_inter = sim.data[network.p_inter]
+	x_target = sim.data[network.p_target]
+	x_bio = sim.data[network.p_bio]
+	x_lif = sim.data[network.p_lif]
+	e_bio = nengo.utils.numpy.rmse(x_bio, x_target)
+	e_lif = nengo.utils.numpy.rmse(x_lif, x_target)
 
 	# encoders = None
 	# for ens in network.ensembles:
@@ -512,18 +517,19 @@ def test_fb_gradual(Simulator):
 	# 		break
 	# plot_tuning_curves(encoders, x_inter, a_bio)
 
-	# fig, ax = plt.subplots(1, 1)
-	# ax.plot(sim.trange(), x_bio, label='bio, e=%.5f' %e_bio)
-	# ax.plot(sim.trange(), x_lif, label='lif, e=%.5f' %e_lif)
-	# ax.plot(sim.trange(), x_target, label='target')
-	# ax.legend()
-	# fig.savefig('plots/fb_gradual_bio_bio_estimates')
+	fig, ax = plt.subplots(1, 1)
+	ax.plot(sim.trange(), x_bio, label='bio, e=%.5f' %e_bio)
+	ax.plot(sim.trange(), x_lif, label='lif, e=%.5f' %e_lif)
+	ax.plot(sim.trange(), x_target, label='target')
+	ax.legend()
+	fig.savefig('plots/fb_gradual_bio_bio_estimates')
 
-	# # fig, ax = plt.subplots(1, 1)
-	# # kdeplot(d_inter_bio.squeeze(), label='inter_bio')
-	# # kdeplot(d_bio_bio.squeeze(), label='bio_bio')
-	# # ax.legend()
-	# # fig.savefig('plots/fb_gradual_bio_bio_decoders')
+	fig, ax = plt.subplots(1, 1)
+	kdeplot(d_inter_bio.squeeze(), label='inter_bio')
+	kdeplot(d_bio_bio.squeeze(), label='bio_bio')
+	kdeplot(d_bio_out.squeeze(), label='bio_out')
+	ax.legend()
+	fig.savefig('plots/fb_gradual_bio_bio_decoders')
 
 	# # note: full weight matrices for each of n_syn synapses, just look at 0th syn
 	# # fig, ax = plt.subplots(1, 1)
