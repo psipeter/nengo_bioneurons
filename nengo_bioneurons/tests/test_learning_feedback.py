@@ -17,7 +17,7 @@ def test_learning_feedback(Simulator):
 	dim = 1
 
 	t_train = 10.0
-	t_learn = 20.0
+	t_learn = 30.0
 	t_test = 10.0
 	t_evo = 10.0
 
@@ -27,7 +27,7 @@ def test_learning_feedback(Simulator):
 	pass2_sig = 'cos'
 	pass2_freq = 1
 	pass2_seed = 2
-	pass3_sig = 'white_noise'
+	pass3_sig = 'cos'
 	pass3_freq = 1
 	pass3_seed = 3
 
@@ -49,8 +49,8 @@ def test_learning_feedback(Simulator):
 	data_dir = '/home/pduggins/nengo_bioneurons/nengo_bioneurons/tests/filters/'
 	filter_dir = 'test_learning_feedback_filter_bio_4'  # bio_4, 10s 3gen
 	ff_dir = 'test_learning_feedback_ff_bio_4'  # bio_4
-	fb_dir = 'test_learning_feedback_fb_bio_7'
-	test_dir = 'test_learning_feedback_test_bio_6'
+	fb_dir = 'test_learning_feedback_fb_bio_8'
+	test_dir = 'test_learning_feedback_test_bio_8'  # 6
 
 	bio_type = BahlNeuron()  # nengo.AdaptiveLIF(tau_n=0.1, inc_n=0.01)  #  
 
@@ -298,7 +298,7 @@ def test_learning_feedback(Simulator):
 	and to initialize the bio_bio connection, using the learning_node to
 	update the bio_bio synaptic weights 
 	'''
-	learning_rate = 1e-5
+	learning_rate = 5e-5
 	h_stim_target = 1/s
 	# Test the accuracy of the feedforward decode
 	try:

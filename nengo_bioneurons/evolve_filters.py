@@ -31,8 +31,8 @@ def evolve_h_d_out(
 	poles_delta,
 	p_bio_act,
 	p_target,
-	training_dir,
-	training_file):
+	training_dir=None,
+	training_file=None):
 
 	def evaluate(inputs):
 		network=inputs[0]
@@ -151,8 +151,10 @@ def evolve_h_d_out(
 				except:
 					continue
 		inputs = [[network, Simulator, filter_pop[p], probes] for p in range(evo_popsize)]
-		# fitnesses = np.array([evaluate(inputs[0]), evaluate(inputs[1]), evaluate(inputs[2])])  # debugging
-		fitnesses = np.array(pool.map(evaluate, inputs))
+		try:
+			fitnesses = np.array(pool.map(evaluate, inputs))
+		except PicklingError:
+			fitnesses = np.array([evaluate(inpt) for inpt in inputs])  # debugging/jupyter
 		best_filter = filter_pop[np.argmin(fitnesses)]
 		best_fitness = fitnesses[np.argmin(fitnesses)]
 		fit_vs_gen.append([best_fitness])
@@ -189,9 +191,10 @@ def evolve_h_d_out(
 	ax1.legend()
 	figure.savefig('plots/evolution/evo_filt.png')  #  % id(p_bio_act)
 
-	np.savez(training_dir+training_file,
-		zeros=best_zeros,
-		poles=best_poles,
-		decoders=best_d_bio)
+	if training_dir is not None and training_file is not None:
+		np.savez(training_dir+training_file,
+			zeros=best_zeros,
+			poles=best_poles,
+			decoders=best_d_bio)
 
 	return best_zeros, best_poles, best_d_bio
