@@ -2,6 +2,7 @@ import numpy as np
 import nengo
 import nengolib
 from pathos import multiprocessing as mp
+from pickle import PicklingError
 import copy
 
 __all__ = ['build_filter', 'evolve_h_d_out']
@@ -21,6 +22,7 @@ def evolve_h_d_out(
 	t_evo,
 	dt,
 	tau,
+	reg,
 	n_threads,
 	evo_popsize,
 	evo_gen,
@@ -31,6 +33,7 @@ def evolve_h_d_out(
 	poles_delta,
 	p_bio_act,
 	p_target,
+	delta_reg=1e-10,
 	training_dir=None,
 	training_file=None):
 
@@ -41,6 +44,7 @@ def evolve_h_d_out(
 		poles = inputs[2][1]
 		p_bio_act = inputs[3][0]
 		p_target = inputs[3][1]
+		reg = inputs[4]
 		"""
 		ensure stim outputs the training signal and the bio/alif are assigned
 		their particular readout filters, as well as other filters that have been
@@ -58,11 +62,11 @@ def evolve_h_d_out(
 		a_bio = sim.data[p_bio_act]
 		x_target = sim.data[p_target]
 		if np.sum(a_bio) > 0:
-			d_bio = nengo.solvers.LstsqL2()(a_bio, x_target)[0]
+			d_bio = nengo.solvers.LstsqL2(reg=reg)(a_bio, x_target)[0]
 		else:
 			d_bio = np.zeros((a_bio.shape[1], x_target.shape[1]))
 		x_bio = np.dot(a_bio, d_bio)
-		e_bio = nengo.utils.numpy.rmse(x_target, x_bio)
+		e_bio = nengolib.signal.nrmse(x_bio, target=x_target)
 		return e_bio
 
 	def get_decoders(inputs, plot=False):
@@ -72,6 +76,7 @@ def evolve_h_d_out(
 		poles = inputs[3]
 		p_bio_act = inputs[4]
 		p_target = inputs[5]
+		reg = inputs[6]
 		"""
 		ensure stim outputs the training signal and the bio/alif are assigned
 		their particular readout filters
@@ -88,24 +93,24 @@ def evolve_h_d_out(
 		a_bio = sim.data[p_bio_act]
 		x_target = sim.data[p_target]
 		if np.sum(a_bio) > 0:
-			d_bio = nengo.solvers.LstsqL2()(a_bio, x_target)[0]
+			d_bio = nengo.solvers.LstsqL2(reg=reg)(a_bio, x_target)[0]
 		else:
 			d_bio = np.zeros((a_bio.shape[1], x_target.shape[1]))
 		x_bio = np.dot(a_bio, d_bio)
-		e_bio = nengo.utils.numpy.rmse(x_target, x_bio)
+		e_bio = nengolib.signal.nrmse(x_bio, target=x_target)
 
 		import matplotlib.pyplot as plt
 		figure, ax1 = plt.subplots(1,1)
 		ax1.plot(sim.trange(), x_bio, label='bio, e=%.5f' %e_bio)
 		ax1.plot(sim.trange(), x_target, label='target')
 		ax1.set(xlabel='time (s)', ylabel='activity',
-			title='zeros: %s \npoles: %s' %(zeros, poles))
+			title='zeros: %s \npoles: %s \nreg: %s' %(zeros, poles, reg))
 		ax1.legend()
 		figure.savefig('plots/evolution/evo_decodes.png')  # %id(p_bio_act)
 		figure, ax1 = plt.subplots(1,1)
 		ax1.plot(sim.trange(), a_bio, label='bio')
 		ax1.set(xlabel='time (s)', ylabel='activity',
-			title='zeros: %s \npoles: %s' %(zeros, poles))
+			title='zeros: %s \npoles: %s \nreg: %s' %(zeros, poles, reg))
 		ax1.legend()
 		figure.savefig('plots/evolution/evo_activities.png')  # %id(p_bio_act)
 
@@ -116,14 +121,17 @@ def evolve_h_d_out(
 
 	""" Initialize evolutionary population """
 	filter_pop = []
+	reg_pop = []
 	for p in range(evo_popsize):
-		my_zeros= []
+		my_zeros = []
 		my_poles = []
 		for z in zeros_init:
 			my_zeros.append(rng.uniform(-z, z))
 		for p in poles_init:
 			my_poles.append(rng.uniform(0, p))  # poles must be negative
+		my_reg = np.abs(rng.normal(reg, delta_reg))
 		filter_pop.append([my_zeros, my_poles])
+		reg_pop.append(my_reg)
 
 
 	""" Run evolutionary strategy """
@@ -150,32 +158,37 @@ def evolve_h_d_out(
 					conn.synapse.default_size_out = 1
 				except:
 					continue
-		inputs = [[network, Simulator, filter_pop[p], probes] for p in range(evo_popsize)]
+		inputs = [[network, Simulator, filter_pop[p], probes, reg_pop[p]] for p in range(evo_popsize)]
 		try:
 			fitnesses = np.array(pool.map(evaluate, inputs))
 		except PicklingError:
 			fitnesses = np.array([evaluate(inpt) for inpt in inputs])  # debugging/jupyter
 		best_filter = filter_pop[np.argmin(fitnesses)]
+		best_reg = reg_pop[np.argmin(fitnesses)]
 		best_fitness = fitnesses[np.argmin(fitnesses)]
 		fit_vs_gen.append([best_fitness])
 		decay = np.exp(-g / 5.0)
 		# decay = 1.0  # off
 		""" repopulate filter pops with mutated copies of the best individual """
 		filter_pop_new = []
+		reg_pop_new = []
 		for p in range(evo_popsize):
 			my_zeros = []
 			my_poles = []
 			for term in range(len(best_filter[0])):
 				my_zeros.append(best_filter[0][term] + rng.normal(0, zeros_delta[term]) * decay)  # mutate
 			for term in range(len(best_filter[1])):
-				my_poles.append(best_filter[1][term] + rng.normal(0, poles_delta[term]) * decay)  # mutate	
+				my_poles.append(best_filter[1][term] + rng.normal(0, poles_delta[term]) * decay)  # mutate
+			my_reg = np.abs(best_reg + rng.normal(0, delta_reg * decay))
 			filter_pop_new.append([my_zeros, my_poles])
+			reg_pop_new.append(my_reg)
 		filter_pop = filter_pop_new
+		reg_pop = reg_pop_new
 
 	""" Grab the best filters and decoders and plot fitness vs generation """
 	best_zeros = best_filter[0]
 	best_poles = best_filter[1]
-	best_d_bio = get_decoders([network, Simulator, best_zeros, best_poles, p_bio_act, p_target], plot=True)
+	best_d_bio = get_decoders([network, Simulator, best_zeros, best_poles, p_bio_act, p_target, best_reg], plot=True)
 
 	import matplotlib.pyplot as plt
 	figure, ax1 = plt.subplots(1,1)
@@ -195,6 +208,7 @@ def evolve_h_d_out(
 		np.savez(training_dir+training_file,
 			zeros=best_zeros,
 			poles=best_poles,
-			decoders=best_d_bio)
+			decoders=best_d_bio,
+			reg=best_reg)
 
 	return best_zeros, best_poles, best_d_bio
