@@ -17,7 +17,7 @@ def test_learning_feedback(Simulator):
 	dim = 1
 
 	t_train = 10.0
-	t_learn = 30.0
+	t_learn = 10.0
 	t_test = 10.0
 	t_evo = 10.0
 
@@ -50,7 +50,7 @@ def test_learning_feedback(Simulator):
 	filter_dir = 'test_learning_feedback_filter_bio_4'  # bio_4, 10s 3gen
 	ff_dir = 'test_learning_feedback_ff_bio_4'  # bio_4
 	fb_dir = 'test_learning_feedback_fb_bio_8'
-	test_dir = 'test_learning_feedback_test_bio_8'  # 6
+	test_dir = 'test_learning_feedback_test_bio_9'  # 6
 
 	bio_type = BahlNeuron()  # nengo.AdaptiveLIF(tau_n=0.1, inc_n=0.01)  #  
 
@@ -419,6 +419,15 @@ def test_learning_feedback(Simulator):
 		err_bio = nengo.utils.numpy.rmse(x_bio, x_target)
 		err_lif = nengo.utils.numpy.rmse(x_lif, x_target)
 		syn_weights = sim.data[network.bio_bio].weights
+
+		encoders = None
+		a_bio = sim.data[network.p_bio_act]
+		x_pre = sim.data[network.p_pre]
+		for ens in network.ensembles:
+			if ens.label == 'bio':
+				encoders = sim.data[ens].encoders
+				break
+		plot_tuning_curves(encoders, x_pre, a_bio, n_neurons=20)
 
 		np.savez(data_dir+test_dir+'.npz',
 			s_bio=s_bio,
