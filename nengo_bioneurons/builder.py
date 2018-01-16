@@ -74,7 +74,7 @@ class ExpSyn(object):
         self.spike_in.weight[0] = abs(self.weight)
 
     def update_weight(self, w_new):
-        self.weight = w_new
+        self.weight += w_new
         if self.weight >= 0.0:
             self.syn.e = self.e_exc
         else:
@@ -201,6 +201,7 @@ class TransmitSpikes(Operator):
                                 # only updates when a spike is sent into this synapse
                                 syn.update_weight(delta_weights[b, n, j])
                                 # bookkeeping for nengo connection weights
+                                # todo: doesn't work with jupyter?
                                 self.learning_node.conn.syn_weights[b, n, j] += delta_weights[b, n, j]
 
         return step
@@ -367,8 +368,7 @@ def build_connection(model, conn):
         # todo: generalize to custom online solvers
         if not isinstance(conn.solver, NoSolver) and conn.syn_weights is None:
             raise BuildError("Connections from bioneurons must provide a NoSolver or syn_weights"
-                            " (got %s from %s to %s)" 
-                            % (conn.solver, conn_pre, conn_post))
+                            " (got %s from %s to %s)" % (conn.solver, conn_pre, conn_post))
 
     if (isinstance(conn_post, nengo.Ensemble) and \
             isinstance(conn_post.neuron_type, BahlNeuron)):
@@ -399,13 +399,14 @@ def build_connection(model, conn):
                 conn_pre.n_neurons,
                 conn_post.n_neurons,
                 conn.n_syn)
-        syn_flag = False
         if conn.syn_weights is None:
-            syn_flag = True
+            use_syn_weights = False
             conn.syn_weights = np.zeros((
                 conn_post.n_neurons,
                 conn_pre.n_neurons,
                 conn.syn_locs.shape[2]))
+        else:
+            use_syn_weights = True
 
         # Grab decoders from the specified solver (usually nengo.solvers.NoSolver(d))
         transform = full_transform(conn, slice_pre=False)
@@ -434,12 +435,12 @@ def build_connection(model, conn):
                         section = bahl.cell.tuft(loc[pre, syn])
                     elif conn.sec == 'basal':
                         section = bahl.cell.basal(loc[pre, syn])
-                    if syn_flag:  # syn_weights should be set by dec_pre and bio encoders/gain
+                    if use_syn_weights:  # syn_weights already specified
+                        w_ij = conn.syn_weights[j, pre, syn]
+                    else:  # syn_weights should be set by dec_pre and bio encoders/gain
                         w_ij = np.dot(decoders.T[pre], gain * encoder)
                         w_ij = w_ij / conn.n_syn / k_norm
                         conn.syn_weights[j, pre, syn] = w_ij
-                    else:  # syn_weights already specified
-                        w_ij = conn.syn_weights[j, pre, syn]
                     if conn.syn_type == 'ExpSyn':
                         tau = conn.tau_list[0]
                         synapse = ExpSyn(section, w_ij, tau, loc[pre, syn])
@@ -450,6 +451,11 @@ def build_connection(model, conn):
                         synapse = Exp2Syn(section, w_ij, tau1, tau2, loc[pre, syn])
                     bahl.synapses[conn_pre][pre][syn] = synapse
         neuron.init()
+
+        # initialize synaptic weights on learned connections to "default" weights
+        # todo: doesn't work lol (for jupyter anyway)
+        # if conn.learning_node is not None:
+        #     conn.learning_node.delta_weights = conn.syn_weights
 
         model.add_op(TransmitSpikes(
             conn_pre, conn_post, conn.learning_node, neurons,
