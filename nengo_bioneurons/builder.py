@@ -11,6 +11,7 @@ from nengo.exceptions import BuildError
 from nengo.utils.builder import full_transform
 from nengo.solvers import NoSolver
 from nengo.builder.operator import Copy
+import copy
 
 from nengo_bioneurons.bahl_neuron import BahlNeuron
 
@@ -19,7 +20,7 @@ class Bahl(object):
 
     def __init__(self):
         super(Bahl, self).__init__()
-        self.synapses = {}  # stores NEURON synapse objects
+        self.synapses = {}  # stores NEURON synapse objects, indexed by conn (ID)
         self.syn_weights = {}  # stores weight matrix, for updating in real-time
         self.cell = neuron.h.Bahl()
         self.v_record = neuron.h.Vector()
@@ -160,9 +161,9 @@ class TransmitSpikes(Operator):
     into a bioensemble.
     """
 
-    def __init__(self, ens_pre, ens_post, learning_node, neurons, spikes, states):
+    def __init__(self, conn, ens_post, learning_node, neurons, spikes, states):
         super(TransmitSpikes, self).__init__()
-        self.ens_pre = ens_pre
+        self.conn = conn
         self.ens_post = ens_post
         self.learning_node = learning_node
         self.neurons = neurons
@@ -181,12 +182,6 @@ class TransmitSpikes(Operator):
         time = signals[self.time]
 
         def step():
-            # update synaptic weights from ens_pre to self if learning rule is on
-            # todo: put weight update somewhere more sensible, this greatly increases runtime
-            # for nrn in self.neurons:
-            #     for n in range(spikes.shape[0]):
-            #         for j, syn in enumerate(nrn.synapses[self.ens_pre][n]):
-            #             syn.update_weight(nrn.syn_weights[self.ens_pre][n, j])
             # transmit spikes at times t_neuron
             if self.learning_node is not None:
                 delta_weights = self.learning_node.delta_weights
@@ -195,7 +190,7 @@ class TransmitSpikes(Operator):
                 num_spikes = int(spikes[n]*dt + 1e-9)
                 for _ in range(num_spikes):
                     for b, nrn in enumerate(self.neurons):
-                        for j, syn in enumerate(nrn.synapses[self.ens_pre][n]):
+                        for j, syn in enumerate(nrn.synapses[self.conn][n]):
                             syn.spike_in.event(t_neuron)
                             if self.learning_node is not None:
                                 # only updates when a spike is sent into this synapse
@@ -407,6 +402,7 @@ def build_connection(model, conn):
                 conn.syn_locs.shape[2]))
         else:
             use_syn_weights = True
+            conn.syn_weights = copy.copy(conn.syn_weights)
 
         # Grab decoders from the specified solver (usually nengo.solvers.NoSolver(d))
         transform = full_transform(conn, slice_pre=False)
@@ -425,7 +421,7 @@ def build_connection(model, conn):
             loc = conn.syn_locs[j]
             encoder = conn_post.encoders[j]
             gain = conn_post.gain[j]
-            bahl.synapses[conn_pre] = np.empty(
+            bahl.synapses[conn] = np.empty(
                 (loc.shape[0], loc.shape[1]), dtype=object)
             for pre in range(loc.shape[0]):
                 for syn in range(loc.shape[1]):
@@ -449,7 +445,7 @@ def build_connection(model, conn):
                         tau1 = conn.tau_list[0]
                         tau2 = conn.tau_list[1]
                         synapse = Exp2Syn(section, w_ij, tau1, tau2, loc[pre, syn])
-                    bahl.synapses[conn_pre][pre][syn] = synapse
+                    bahl.synapses[conn][pre][syn] = synapse
         neuron.init()
 
         # initialize synaptic weights on learned connections to "default" weights
@@ -458,7 +454,7 @@ def build_connection(model, conn):
         #     conn.learning_node.delta_weights = conn.syn_weights
 
         model.add_op(TransmitSpikes(
-            conn_pre, conn_post, conn.learning_node, neurons,
+            conn, conn_post, conn.learning_node, neurons,
             model.sig[conn_pre]['out'], states=[model.time]))
         model.params[conn] = BuiltConnection(eval_points=eval_points,
                                              solver_info=solver_info,
