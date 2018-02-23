@@ -183,8 +183,6 @@ class TransmitSpikes(Operator):
 
         def step():
             # transmit spikes at times t_neuron
-            if self.learning_node is not None:
-                delta_weights = self.learning_node.delta_weights
             t_neuron = (time.item()-dt)*1000
             for n in range(spikes.shape[0]):
                 num_spikes = int(spikes[n]*dt + 1e-9)
@@ -194,10 +192,9 @@ class TransmitSpikes(Operator):
                             syn.spike_in.event(t_neuron)
                             if self.learning_node is not None:
                                 # only updates when a spike is sent into this synapse
-                                syn.update_weight(delta_weights[b, n, j])
+                                syn.update_weight(self.learning_node.delta_weights[b, n, j])
                                 # bookkeeping for nengo connection weights
-                                # todo: doesn't work with jupyter?
-                                self.learning_node.conn.syn_weights[b, n, j] += delta_weights[b, n, j]
+                                self.learning_node.conn.syn_weights[b, n, j] += self.learning_node.delta_weights[b, n, j]
 
         return step
 
@@ -207,6 +204,7 @@ def deref_objview(o):
 @Builder.register(BahlNeuron)
 def build_bioneurons(model, neuron_type, neurons):
     ens = neurons.ensemble
+    bias_method = neuron_type.bias_method
     # todo: generalize to new NEURON models specified by neuron_type
     bioneurons = [Bahl() for _ in range(ens.n_neurons)]
     # todo: call user-defined function that introduces variance into specific
@@ -268,9 +266,9 @@ def build_bioneurons(model, neuron_type, neurons):
     model.params[neurons] = bioneurons
 
     # Build a bias-emulating connection
-    build_bias(model, ens, ens.bias, method='decode')
+    build_bias(model, ens, ens.bias, method=bias_method)
 
-def build_bias(model, bioensemble, biases, method='decode'):
+def build_bias(model, bioensemble, biases, method):
     rng = np.random.RandomState(bioensemble.seed)
     neurons_lif = 100
     neurons_bio = bioensemble.n_neurons
@@ -324,8 +322,8 @@ def build_bias(model, bioensemble, biases, method='decode'):
             (loc.shape[0], loc.shape[1]), dtype=object)
         for pre in range(loc.shape[0]):
             for syn in range(loc.shape[1]):
-                section = bahl.cell.tuft(loc[pre, syn])
-                # section = bahl.cell.apical(loc[pre, syn])
+                # section = bahl.cell.tuft(loc[pre, syn])
+                section = bahl.cell.apical(loc[pre, syn])
                 # w_ij = np.dot(decoders[pre], gain * encoder)
                 if method == 'decode':
                     syn_weights[j, pre, syn] = bias_decoders[pre, j]
@@ -367,7 +365,6 @@ def build_connection(model, conn):
 
     if (isinstance(conn_post, nengo.Ensemble) and \
             isinstance(conn_post.neuron_type, BahlNeuron)):
-
         if not isinstance(conn_pre, nengo.Ensemble) or \
                 'spikes' not in conn_pre.neuron_type.probeable:
             raise BuildError("May only connect spiking neurons (pre=%s) to "
@@ -470,13 +467,13 @@ def gen_encoders(n_neurons, dimensions, radius, rng):
     return encoders.astype(float)
 
 def gen_gains(n_neurons, dimensions, radius, rng):
-    gain_mag = 2e2 * radius
+    gain_mag = 1e2 * radius
     gains = rng.uniform(-gain_mag, gain_mag, size=n_neurons)
     return gains
 
 def gen_biases(n_neurons, dimensions, radius, rng, method='decode'):
     if method == 'decode':
-        bias_mag = 5e1 * radius
+        bias_mag = 1e1 * radius
     elif method == 'weights':
         bias_mag = 5e-3 * radius
     biases = rng.uniform(-bias_mag, bias_mag, size=n_neurons)

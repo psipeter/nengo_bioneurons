@@ -5,6 +5,7 @@ import numpy as np
 import neuron
 
 from nengo.neurons import NeuronType
+from nengo.params import StringParam
 
 # Load NEURON model (TODO: installation instructions)
 neuron.h.load_file(os.path.abspath(os.path.join(
@@ -17,9 +18,11 @@ class BahlNeuron(NeuronType):
     """Compartmental neuron from Bahl et al 2012."""
 
     probeable = ('spikes', 'voltage')
+    bias_method = StringParam('bias_method')
 
-    def __init__(self):
+    def __init__(self, bias_method='decode'):
         super(BahlNeuron, self).__init__()
+        self.bias_method = bias_method
 
     def rates(self, x, gain, bias):
         return x
@@ -38,3 +41,13 @@ class BahlNeuron(NeuronType):
             count, volt = bahl.update()
             spiked[i] = count / dt
             voltage[i] = volt
+
+    @property
+    def _argreprs(self):
+        args = []
+
+        def add(attr, default):
+            if getattr(self, attr) != default:
+                args.append("%s=%s" % (attr, getattr(self, attr)))
+        add("bias_method", "decode")
+        return args
