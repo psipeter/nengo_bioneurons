@@ -32,12 +32,21 @@ class Bahl(object):
         self.ap_counter.record(neuron.h.ref(self.spikes))
         self.num_spikes_last = 0
         self._clean = False
+        self.overspike_warn = False
+        self.overspike_thresh = 10
+        self.overspike_window = 100
 
     def update(self):
         if self._clean:
             raise RuntimeError("cannot update() after cleanup()")
         count = len(self.spikes) - self.num_spikes_last
         self.num_spikes_last = len(self.spikes)
+        if not self.overspike_warn:
+            if (len(self.spikes) >= self.overspike_thresh and
+                    self.spikes[-1] - self.spikes[-self.overspike_thresh] <= self.overspike_window):
+                warnings.warn('neuron %s spiked %s times in last 100 ms'\
+                    %(self, self.overspike_thresh))
+                self.overspike_warn = True
         return count, np.asarray(self.v_record)[-1]
 
     def cleanup(self):
@@ -303,10 +312,7 @@ def build_bias(model, bioensemble, biases, method):
         syn_loc.shape[2]))
     if method == 'weights':
         for b in range(syn_weights.shape[0]):
-            mean_bias = biases[b]
-            # arbitrary heuistic for sigma, but must be nonzero
-            std_bias = (np.max(biases) - np.min(biases)) / 10 + 1e-10
-            syn_weights[b] = rng.normal(mean_bias, std_bias, size=syn_weights[b].shape)
+            syn_weights[b] = rng.uniform(np.max(biases), np.min(biases), size=syn_weights[b].shape)
 
     # unit test that synapse and weight arrays are compatible shapes
     if not syn_loc.shape[:-1] == bias_decoders.T.shape:

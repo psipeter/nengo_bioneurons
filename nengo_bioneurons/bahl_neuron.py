@@ -49,5 +49,5 @@ class BahlNeuron(NeuronType):
         def add(attr, default):
             if getattr(self, attr) != default:
                 args.append("%s=%s" % (attr, getattr(self, attr)))
-        add("bias_method", "decode")
+        add("bias_method", self.bias_method)
         return args
