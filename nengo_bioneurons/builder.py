@@ -83,8 +83,11 @@ class ExpSyn(object):
         self.spike_in = neuron.h.NetCon(None, self.syn)        
         self.spike_in.weight[0] = abs(self.weight)
 
-    def update_weight(self, w_new):
-        self.weight += w_new
+    def update_weight(self, w_new, update='delta'):
+        if update == 'delta':
+            self.weight += w_new
+        elif update == 'set':
+            self.weight = w_new
         if self.weight >= 0.0:
             self.syn.e = self.e_exc
         else:
@@ -119,8 +122,11 @@ class Exp2Syn(object):
         self.spike_in = neuron.h.NetCon(None, self.syn)        
         self.spike_in.weight[0] = abs(self.weight)
 
-    def update_weight(self, w_new):
-        self.weight += w_new
+    def update_weight(self, w_new, update='delta'):
+        if update == 'delta':
+            self.weight += w_new
+        elif update == 'set':
+            self.weight = w_new
         if self.weight >= 0.0:
             self.syn.e = self.e_exc
         else:
@@ -200,10 +206,16 @@ class TransmitSpikes(Operator):
                         for j, syn in enumerate(nrn.synapses[self.conn][n]):
                             syn.spike_in.event(t_neuron)
                             if self.learning_node is not None:
+                                '''encoder-based learning rule code'''
+                                # update synaptic encoder when a spike is sent into this synapse
+                                w_new = self.learning_node.update_encoders(b, n, j)
+                                syn.update_weight(w_new, update='set')
+                                self.learning_node.conn.syn_weights[b, n, j] = w_new  # bookkeeping
+                                '''weight-based learning rule code'''
                                 # only updates when a spike is sent into this synapse
-                                syn.update_weight(self.learning_node.delta_weights[b, n, j])
+                                # syn.update_weight(self.learning_node.delta_weights[b, n, j])
                                 # bookkeeping for nengo connection weights
-                                self.learning_node.conn.syn_weights[b, n, j] += self.learning_node.delta_weights[b, n, j]
+                                # self.learning_node.conn.syn_weights[b, n, j] += self.learning_node.delta_weights[b, n, j]
 
         return step
 
@@ -237,37 +249,55 @@ def build_bioneurons(model, neuron_type, neurons):
     # However, setting them like 'neurons' are set below may not be possible
     # because these attributes are used in more places in the build process.
     rng = np.random.RandomState(seed=ens.seed)
-    if (hasattr(ens, 'encoders')
-            and ens.encoders is not None
-            and not isinstance(ens.encoders, np.ndarray)):
-        ens.encoders = nengo.dists.get_samples(ens.encoders, ens.n_neurons, ens.dimensions, rng)
+    if hasattr(ens, 'encoders') and ens.encoders is not None:
+        if not isinstance(ens.encoders, np.ndarray):
+            ens.encoders = nengo.dists.get_samples(ens.encoders, ens.n_neurons, ens.dimensions, rng)
     else:
-        ens.encoders = gen_encoders(
-            ens.n_neurons,
-            ens.dimensions,
-            ens.radius,
-            rng)
-    if (hasattr(ens, 'gain')
-            and ens.gain is not None
-            and not isinstance(ens.gain, np.ndarray)):
-        ens.gain = nengo.dists.get_samples(ens.gain, ens.n_neurons, 1, rng)[:,0]
+        ens.encoders = gen_encoders(ens.n_neurons, ens.dimensions, ens.radius, rng)
+
+    if hasattr(ens, 'gain') and ens.gain is not None:
+        if not isinstance(ens.gain, np.ndarray):
+            ens.gain = nengo.dists.get_samples(ens.gain, ens.n_neurons, 1, rng)[:,0]
     else:
-        ens.gain = gen_gains(
-            ens.n_neurons,
-            ens.dimensions,
-            ens.radius,
-            rng)
-    if (hasattr(ens, 'bias')
-            and ens.bias is not None
-            and not isinstance(ens.bias, np.ndarray)):
-        ens.bias = nengo.dists.get_samples(ens.bias, ens.n_neurons, 1, rng)[:,0]
+        ens.gain = gen_gains(ens.n_neurons, ens.dimensions, ens.radius, rng)
+
+    if hasattr(ens, 'bias') and ens.bias is not None:
+        if not isinstance(ens.bias, np.ndarray):
+            ens.bias = nengo.dists.get_samples(ens.bias, ens.n_neurons, 1, rng)[:,0]
     else:
-        ens.bias = gen_biases(
-            ens.n_neurons,
-            ens.dimensions,
-            ens.radius,
-            rng,
-            method='decode')
+        ens.bias = gen_bias(ens.n_neurons, ens.dimensions, ens.radius, rng, method=bias_method)
+
+    # if (hasattr(ens, 'encoders')
+    #         and ens.encoders is not None
+    #         and not isinstance(ens.encoders, np.ndarray)):
+    #     ens.encoders = nengo.dists.get_samples(ens.encoders, ens.n_neurons, ens.dimensions, rng)
+    # else:
+    #     ens.encoders = gen_encoders(
+    #         ens.n_neurons,
+    #         ens.dimensions,
+    #         ens.radius,
+    #         rng)
+    # if (hasattr(ens, 'gain')
+    #         and ens.gain is not None
+    #         and not isinstance(ens.gain, np.ndarray)):
+    #     ens.gain = nengo.dists.get_samples(ens.gain, ens.n_neurons, 1, rng)[:,0]
+    # else:
+    #     ens.gain = gen_gains(
+    #         ens.n_neurons,
+    #         ens.dimensions,
+    #         ens.radius,
+    #         rng)
+    # if (hasattr(ens, 'bias')
+    #         and ens.bias is not None
+    #         and not isinstance(ens.bias, np.ndarray)):
+    #     ens.bias = nengo.dists.get_samples(ens.bias, ens.n_neurons, 1, rng)[:,0]
+    # else:
+    #     ens.bias = gen_biases(
+    #         ens.n_neurons,
+    #         ens.dimensions,
+    #         ens.radius,
+    #         rng,
+    #         method='decode')
 
     model.add_op(op)
 
@@ -277,7 +307,7 @@ def build_bioneurons(model, neuron_type, neurons):
     # Build a bias-emulating connection
     build_bias(model, ens, ens.bias, method=bias_method)
 
-def build_bias(model, bioensemble, biases, method):
+def build_bias(model, bioensemble, biases, method, bias_gain=5e-5):
     rng = np.random.RandomState(bioensemble.seed)
     neurons_lif = 100
     neurons_bio = bioensemble.n_neurons
@@ -291,7 +321,7 @@ def build_bias(model, bioensemble, biases, method):
             add_to_container=False)
     model.seeds[lif] = bioensemble.seed  # seeds normally set early in builder
     model.build(lif)  # add to the model
-    model.add_op(Copy(Signal(1), model.sig[lif]['in'], inc=True))  # connect input(t)=1
+    model.add_op(Copy(Signal(0), model.sig[lif]['in'], inc=True))  # connect input(t)=1
     A = get_activities(model.params[lif],  # grab tuning curve activities
         lif,
         model.params[lif].eval_points)
@@ -313,6 +343,9 @@ def build_bias(model, bioensemble, biases, method):
     if method == 'weights':
         for b in range(syn_weights.shape[0]):
             syn_weights[b] = rng.uniform(np.max(biases), np.min(biases), size=syn_weights[b].shape)
+    if method == 'weights_fixed':
+        for b in range(syn_weights.shape[0]):
+            syn_weights[b] = bias_gain * biases[b]**5 * np.ones(syn_weights[b].shape)
 
     # unit test that synapse and weight arrays are compatible shapes
     if not syn_loc.shape[:-1] == bias_decoders.T.shape:
