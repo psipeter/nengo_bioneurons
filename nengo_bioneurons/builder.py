@@ -439,6 +439,10 @@ def build_connection(model, conn):
         else:
             use_syn_weights = True
             conn.syn_weights = copy.copy(conn.syn_weights)
+        if conn.learning_node is not None and hasattr(conn.learning_node, 'syn_encoders'):
+            # initialize synaptic weights for EncoderNode learned connection
+            use_syn_weights = True
+            conn.syn_weights = np.array(conn.learning_node.update_weights())
 
         # Grab decoders from the specified solver (usually nengo.solvers.NoSolver(d))
         transform = full_transform(conn, slice_pre=False)
@@ -483,11 +487,6 @@ def build_connection(model, conn):
                         synapse = Exp2Syn(section, w_ij, tau1, tau2, loc[pre, syn])
                     bahl.synapses[conn][pre][syn] = synapse
         neuron.init()
-
-        # initialize synaptic weights on learned connections to "default" weights
-        # todo: doesn't work lol (for jupyter anyway)
-        # if conn.learning_node is not None:
-        #     conn.learning_node.delta_weights = conn.syn_weights
 
         model.add_op(TransmitSpikes(
             conn, conn_post, conn.learning_node, neurons,
