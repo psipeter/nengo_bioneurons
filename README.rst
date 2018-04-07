@@ -68,3 +68,10 @@ Install nengo_bioneurons
     cd ~/nengo_bioneurons
 
     pip install .
+    
+Common Problems
+===============
+
+Hyperopt fails with "'generator' object has no attribute 'getitem'"
+    
+    pip install networkx==1.11
