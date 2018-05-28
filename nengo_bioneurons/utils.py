@@ -2,8 +2,9 @@ import nengo
 import numpy as np
 import matplotlib.pyplot as plt
 import seaborn as sns
+from nengolib.signal import s
 
-__all__ = ['plot_tuning_curves']
+__all__ = ['plot_tuning_curves', 'make_stimulus', 'norms']
 
 def plot_tuning_curves(
     encoders,
@@ -46,3 +47,40 @@ def plot_tuning_curves(
 
     ax.legend()
     fig.savefig(figname)
+
+def make_stimulus(signal, freq, amp, seed):       
+    if signal == 'cos':
+        return nengo.Node(output=lambda t: np.cos(freq*t))
+    elif signal == 'sin':
+        return nengo.Node(output=lambda t: np.sin(freq*t))
+    elif signal == 'ramp':
+        return nengo.Node(output=lambda t: 1.0/freq*(t<freq))
+    elif signal == 'white_noise':
+        return nengo.Node(nengo.processes.WhiteSignal(
+            period=100,
+            high=freq,
+            rms=amp,
+            seed=seed))
+
+
+def norms(signal, freq, amp, ss, tau, t, dt=0.001, plot=False):
+    lpf=nengo.Lowpass(tau)
+    with nengo.Network() as model:
+        stim = make_stimulus(signal, freq, amp, ss)
+        p_stim = nengo.Probe(stim, synapse=None)
+        p_integral = nengo.Probe(stim, synapse=1/s)
+    with nengo.Simulator(model, progress_bar=False, dt=dt) as sim:
+        sim.run(t, progress_bar=False)
+    stimulus = sim.data[p_stim]
+    target = sim.data[p_integral]
+    target_f = lpf.filt(sim.data[p_integral], dt=dt)
+    norm_s = np.max(np.abs(stimulus))
+    norm = np.max(np.abs(target))
+    norm_f = np.max(np.abs(target_f))
+    if plot:
+        plt.plot(sim.trange(), stimulus, label='stim', alpha=0.5)
+        plt.plot(sim.trange(), target, label='integral', alpha=0.5)
+        plt.plot(sim.trange(), lpf.filt(sim.data[p_integral]/norm_f, dt=dt), label='target', alpha=0.5)
+        plt.legend()
+        plt.show()
+    return norm, norm_s, norm_f
